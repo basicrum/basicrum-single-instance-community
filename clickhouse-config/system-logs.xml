@@ -1,0 +1,27 @@
+<clickhouse>
+    <!-- ClickHouse tuning for a single server that also runs the rest of the
+         Basicrum stack. Carried over from the public demo, where the defaults,
+         meant for a dedicated analytics server, ran a 4 GiB host out of memory:
+         system.metric_log (over 1,100 columns) grew until its TTL merges could
+         no longer fit in memory, and the server was killed. -->
+
+    <!-- Memory: ClickHouse sizes itself from total RAM (90 % by default). Leave
+         room for the application containers and Postgres. -->
+    <max_server_memory_usage_to_ram_ratio>0.7</max_server_memory_usage_to_ram_ratio>
+
+    <!-- Logging: the image default is trace, which writes gigabytes. -->
+    <logger><level>warning</level></logger>
+
+    <!-- Disabled system logs: the very wide ones cannot be merged on a small host. -->
+    <text_log remove="1"/>
+    <metric_log remove="1"/>
+    <query_metric_log remove="1"/>
+
+    <!-- Narrow logs kept, with 3-day retention. -->
+    <asynchronous_metric_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></asynchronous_metric_log>
+    <query_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></query_log>
+    <trace_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></trace_log>
+    <part_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></part_log>
+    <error_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></error_log>
+    <processors_profile_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></processors_profile_log>
+</clickhouse>

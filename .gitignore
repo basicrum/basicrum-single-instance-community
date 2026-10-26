@@ -1,0 +1,12 @@
+# Written by start.sh for this server; never commit them.
+.env
+traefik/traefik.yml
+traefik/dynamic/*.yml
+traefik/ssl/*
+!traefik/ssl/.gitkeep
+!traefik/dynamic/.gitkeep
+
+# Generated, self-contained installer; build from the allowlisted source files.
+dist/
+__pycache__/
+.DS_Store

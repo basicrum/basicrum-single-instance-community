@@ -1,0 +1,247 @@
+# Basicrum, single-server community distribution.
+#
+# This is the stack the Monarch control plane renders for the public demo
+# (demo.playground.basicrum.com), with every secret and host-specific value
+# moved into .env. Run ./start.sh once: it writes .env with generated secrets,
+# writes the Traefik configuration for the TLS mode you choose, and starts the
+# stack. Later runs keep .env and converge the containers.
+#
+# Services and wiring:
+#
+#   traefik                 fronts ${DOMAIN}; routes by path, highest priority first
+#     200  Path(/beacon/catcher)     -> basicrum_beacon_service:3100
+#     100  PathPrefix(/backend/v1)   -> basicrum_backend:8080
+#       1  everything else           -> basicrum_frontend:3000
+#   basicrum_backend        API; runs the Postgres and ClickHouse migrations on start
+#   basicrum_beacon_service beacon ingestion (Rust), writes to ClickHouse
+#   basicrum_frontend       the dashboard (Next.js), talks to the backend over the proxy network
+#   basicrum_postgres       users, organizations, sites
+#   clickhouse              RUM events; published on 127.0.0.1 only
+#
+# Networks: `proxy` carries Traefik and everything it routes to; `internal`
+# carries the databases and the two services that write to them.
+#
+# Port 443 is added by compose.https.yml, which start.sh includes through
+# COMPOSE_FILE in .env when the TLS mode is letsencrypt or custom.
+
+name: basicrum
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  traefik:
+    image: traefik:${TRAEFIK_VERSION:-v3.7.16}
+    restart: always
+    logging: *default-logging
+    ports:
+      - "${HTTP_BIND:+${HTTP_BIND}:}${HTTP_PORT:-80}:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - ./traefik/ssl:/etc/certs:ro
+      - traefik-acme:/letsencrypt
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      basicrum_backend:
+        condition: service_healthy
+      basicrum_beacon_service:
+        condition: service_healthy
+      basicrum_frontend:
+        condition: service_healthy
+
+  basicrum_backend:
+    image: basicrum/backend:${BASICRUM_VERSION:?run ./start.sh to create .env}
+    platform: linux/amd64
+    restart: always
+    logging: *default-logging
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8080"
+      NODE_ENV: production
+      APP_BASE_URL: ${PUBLIC_URL:?run ./start.sh to create .env}
+      PG_URL: postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?run ./start.sh to create .env}@basicrum_postgres:5432/${POSTGRES_DB:?}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run ./start.sh to create .env}
+      JWT_SECRET: ${JWT_SECRET:?run ./start.sh to create .env}
+      COOKIE_SECRET: ${COOKIE_SECRET:?run ./start.sh to create .env}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?run ./start.sh to create .env}
+      ORG_TOKEN_ENC_KEY_V1: ${ORG_TOKEN_ENC_KEY_V1:-}
+      SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
+      SAAS_SIGNUP_ENABLED: "false"
+      TELEMETRY_EXPOSE: ${TELEMETRY_EXPOSE:-false}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - "node -e \"fetch('http://127.0.0.1:8080/backend/v1/health').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))\""
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      basicrum_postgres:
+        condition: service_healthy
+    networks:
+      - proxy
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.basicrum_backend.rule=Host(`${DOMAIN:?run ./start.sh to create .env}`) && PathPrefix(`/backend/v1`)"
+      - "traefik.http.routers.basicrum_backend.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.basicrum_backend.priority=100"
+      - "traefik.http.services.basicrum_backend.loadbalancer.server.port=8080"
+      - "traefik.docker.network=${COMPOSE_PROJECT_NAME:-basicrum}_proxy"
+
+  basicrum_beacon_service:
+    image: basicrum/beacon_service:${BASICRUM_VERSION:?run ./start.sh to create .env}
+    platform: linux/amd64
+    restart: always
+    logging: *default-logging
+    environment:
+      BEACON_SERVICE_PORT: "3100"
+      MAX_CONCURRENCY: ${BEACON_MAX_CONCURRENCY:-100}
+      RUST_LOG: ${BEACON_LOG_LEVEL:-info}
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run ./start.sh to create .env}
+      ALLOW_BEACON_IP_OVERRIDE: ${ALLOW_BEACON_IP_OVERRIDE:-no}
+      ALLOW_BEACON_TIMESTAMP_OVERRIDE: ${ALLOW_BEACON_TIMESTAMP_OVERRIDE:-no}
+      TELEMETRY_EXPOSE: ${TELEMETRY_EXPOSE:-false}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q --spider http://127.0.0.1:3100/health
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      # The beacon service pre-loads dimension tables that the backend's
+      # ClickHouse migrations create; on a fresh install it must start after them.
+      basicrum_backend:
+        condition: service_healthy
+    networks:
+      - proxy
+      - internal
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.basicrum_beacon_service.rule=Host(`${DOMAIN:?run ./start.sh to create .env}`) && Path(`/beacon/catcher`)"
+      - "traefik.http.routers.basicrum_beacon_service.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.basicrum_beacon_service.priority=200"
+      - "traefik.http.services.basicrum_beacon_service.loadbalancer.server.port=3100"
+      - "traefik.docker.network=${COMPOSE_PROJECT_NAME:-basicrum}_proxy"
+
+  basicrum_frontend:
+    image: basicrum/frontend:${BASICRUM_VERSION:?run ./start.sh to create .env}
+    platform: linux/amd64
+    restart: always
+    logging: *default-logging
+    environment:
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?run ./start.sh to create .env}
+      AUTH_URL: ${PUBLIC_URL:?run ./start.sh to create .env}
+      NEXT_PUBLIC_API_URL: ${PUBLIC_URL:?run ./start.sh to create .env}
+      NEXT_PUBLIC_BEACON_ENDPOINT: ${PUBLIC_URL:?run ./start.sh to create .env}/beacon/catcher
+      BACKEND_URL_FOR_AUTH: http://basicrum_backend:8080/backend/v1
+      NEXT_PUBLIC_SAAS_SIGNUP_ENABLED: "false"
+      NEXT_PUBLIC_ENABLE_CHATBOT: ${NEXT_PUBLIC_ENABLE_CHATBOT:-}
+      NEXT_PUBLIC_IS_DEMO: ${NEXT_PUBLIC_IS_DEMO:-false}
+      NEXT_PUBLIC_DEMO_EMAIL: ${NEXT_PUBLIC_DEMO_EMAIL:-}
+      NEXT_PUBLIC_DEMO_PASSWORD: ${NEXT_PUBLIC_DEMO_PASSWORD:-}
+      TELEMETRY_EXPOSE: ${TELEMETRY_EXPOSE:-false}
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q --spider http://127.0.0.1:3000/auth/login || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    depends_on:
+      basicrum_backend:
+        condition: service_healthy
+    networks:
+      - proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.basicrum_frontend.rule=Host(`${DOMAIN:?run ./start.sh to create .env}`)"
+      - "traefik.http.routers.basicrum_frontend.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
+      - "traefik.http.routers.basicrum_frontend.priority=1"
+      - "traefik.http.services.basicrum_frontend.loadbalancer.server.port=3000"
+      - "traefik.docker.network=${COMPOSE_PROJECT_NAME:-basicrum}_proxy"
+
+  basicrum_postgres:
+    image: postgres:${POSTGRES_VERSION:-17.5}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./start.sh to create .env}
+      POSTGRES_DB: ${POSTGRES_DB:?}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - internal
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-26.8.34.13-alpine}
+    restart: unless-stopped
+    logging: *default-logging
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run ./start.sh to create .env}
+    # Loopback only: maintenance from the host, nothing from outside.
+    ports:
+      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+      - "127.0.0.1:${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - ./clickhouse-config/system-logs.xml:/etc/clickhouse-server/config.d/system-logs.xml:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q --spider http://127.0.0.1:8123/ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - internal
+
+networks:
+  proxy:
+    name: ${COMPOSE_PROJECT_NAME:-basicrum}_proxy
+  internal:
+    driver: bridge
+
+volumes:
+  postgres-data: {}
+  clickhouse-data: {}
+  traefik-acme: {}
