@@ -54,30 +54,33 @@ loopback interface for maintenance; Postgres is not published at all.
 
 ## Install
 
-### One-command installer
+### Self-contained installer
 
-The distribution includes a builder for a self-contained installer. Once its
-generated `dist/install.sh` is hosted at the proposed URL below, users can run:
+There is no published `install.sh` release asset yet, so a public download
+command is not available. To use the self-contained installer now, build it
+from this checkout and run the generated file:
 
 ```bash
-curl -fsSL https://basicrum.com/community/install.sh | bash
+python3 scripts/build-installer.py
+bash dist/install.sh
 ```
 
-**That URL is a proposed publishing location, not a live download supplied by
-this repository.** Build and test the installer locally as described below;
-hosting it is a separate step.
+The [releases page](https://github.com/basicrum/basicrum-single-instance-community/releases)
+will provide the download after the first release is published. The release
+process is described below.
 
 The installer unpacks the required files into `~/basicrum`, then runs the
 existing setup. It asks for your hostname, TLS mode, and any needed certificate
 details through the terminal, including when Bash is reading the script from
-a pipe. Docker must already be installed and running. Git, Python, and a source
-checkout are not required on the user's machine. The host requirements above
-are checked before the installer replaces any installed files.
+a pipe. Docker must already be installed and running. Running a prebuilt
+`install.sh` does not require Git, Python, or a source checkout; building it
+from this repository does. The host requirements above are checked before the
+installer replaces any installed files.
 
-For an unattended installation, pass the settings after `bash -s --`:
+For an unattended installation, pass the settings as arguments:
 
 ```bash
-curl -fsSL https://basicrum.com/community/install.sh | bash -s -- \
+bash dist/install.sh \
   --install-dir "$HOME/basicrum" \
   --domain rum.example.com --tls letsencrypt --email you@example.com --yes
 ```
@@ -495,9 +498,7 @@ curl -fsSL http://127.0.0.1:8765/install.sh | bash -s -- \
 ```
 
 This writes and validates the preview configuration without starting services.
-Omit `--no-start` to run it, or run `~/basicrum-preview/start.sh` later. To offer
-the public one-liner, separately publish the generated file as a static HTTPS
-resource at the chosen URL (and publish its checksum alongside it).
+Omit `--no-start` to run it, or run `~/basicrum-preview/start.sh` later.
 
 ## CI and installer releases
 
@@ -548,11 +549,6 @@ redact the generated secrets. `--no-pull` uses cached images for local runs;
 the release workflow always pulls. This check exercises HTTP mode; it does
 not test public DNS, Let's Encrypt issuance or browser interactions.
 
-After publishing a stable release with the installer asset, the public command
-is (replace `OWNER` and `REPO`):
-
-```bash
-curl -fsSL https://github.com/OWNER/REPO/releases/latest/download/install.sh | bash
-```
-
-For a particular release, replace `latest/download` with `download/v1.0.0`.
+After publishing a stable release, add its live installer download command to
+the installation section above. The current release assets, when available,
+are listed on the [releases page](https://github.com/basicrum/basicrum-single-instance-community/releases).
