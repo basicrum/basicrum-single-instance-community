@@ -356,14 +356,17 @@ if [ "$TLS_MODE" = custom ]; then
   fi
   check_pair() { # check_pair CERT KEY: die unless they are a matching PEM pair
     have openssl || return 0
-    local cert_pub key_pub
+    local cert_pub key_pub host_check
     openssl x509 -noout -in "$1" >/dev/null 2>&1 || die "$1 is not a PEM certificate"
     openssl pkey -noout -in "$2" >/dev/null 2>&1 || die "$2 is not a PEM private key"
     cert_pub="$(openssl x509 -noout -pubkey -in "$1" | openssl pkey -pubin -outform DER | openssl dgst -sha256 | awk '{print $NF}')"
     key_pub="$(openssl pkey -in "$2" -pubout -outform DER | openssl dgst -sha256 | awk '{print $NF}')"
     [ "$cert_pub" = "$key_pub" ] || die "the certificate and the private key do not belong together ($1, $2)"
-    openssl x509 -noout -checkhost "$DOMAIN" -in "$1" >/dev/null 2>&1 \
-      || die "the certificate does not cover $DOMAIN; Cloudflare Full (strict) and browsers require a matching hostname"
+    host_check="$(openssl x509 -noout -checkhost "$DOMAIN" -in "$1" 2>&1)" || host_check=""
+    case "$host_check" in
+      *'does match certificate'*) ;;
+      *) die "the certificate does not cover $DOMAIN; Cloudflare Full (strict) and browsers require a matching hostname" ;;
+    esac
     openssl x509 -noout -checkend 0 -in "$1" >/dev/null 2>&1 \
       || die "the certificate has expired; Cloudflare Full (strict) and browsers require a valid certificate"
     ok "certificate pair checked: $(openssl x509 -noout -enddate -in "$1" | sed 's/notAfter=/valid until /')"
