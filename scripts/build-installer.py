@@ -20,6 +20,14 @@ BUNDLE_FILES = (
 
 
 def build(output: Path) -> None:
+    start_file = ROOT / "start.sh"
+    if start_file.is_symlink() or not start_file.is_file():
+        raise ValueError(f"Bundle input must be a regular file: {start_file}")
+    start_source = start_file.read_text()
+    versions = re.findall(r'^DEFAULT_BASICRUM_VERSION="([^"]+)"$', start_source, re.MULTILINE)
+    stable_tag = r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)'
+    if len(versions) != 1 or not re.fullmatch(stable_tag, versions[0]):
+        raise ValueError("start.sh must declare one stable DEFAULT_BASICRUM_VERSION")
     embedded_files = []
     for name in BUNDLE_FILES:
         source = ROOT / name
@@ -43,7 +51,9 @@ def build(output: Path) -> None:
         )
     template = (ROOT / "installer/bootstrap.sh").read_text()
     assert template.count("@BASICRUM_FILES@") == 1
-    script = template.replace("@BASICRUM_FILES@", "\n".join(embedded_files))
+    assert template.count("@BASICRUM_VERSION@") == 1
+    script = template.replace("@BASICRUM_VERSION@", versions[0])
+    script = script.replace("@BASICRUM_FILES@", "\n".join(embedded_files))
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(script)
     output.chmod(0o755)

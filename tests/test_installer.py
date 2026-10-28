@@ -31,6 +31,9 @@ class QuietHandler(SimpleHTTPRequestHandler):
 class InstallerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.image_version = re.search(
+            r'^DEFAULT_BASICRUM_VERSION="([^"]+)"$', (ROOT / "start.sh").read_text(), re.MULTILINE
+        ).group(1)
         cls.build_dir = tempfile.TemporaryDirectory(prefix="basicrum-build-test-")
         cls.installer = Path(cls.build_dir.name) / "install.sh"
         subprocess.run(
@@ -129,7 +132,7 @@ esac
     def test_unattended_install_and_rerun_preserve_state(self):
         self.assert_ok(self.run_installer())
         before = (self.dest / ".env").read_bytes()
-        self.assertIn(b"BASICRUM_VERSION=0.0.1\n", before)
+        self.assertIn(f"BASICRUM_VERSION={self.image_version}\n".encode(), before)
         self.assertEqual((self.dest / ".env").stat().st_mode & 0o777, 0o600)
         for name in ("user-data/sentinel", "traefik/ssl/cert.pem", "traefik/ssl/key.pem"):
             path = self.dest / name
@@ -142,6 +145,34 @@ esac
         calls = (self.root / "docker.log").read_text()
         self.assertNotIn("compose pull", calls)
         self.assertNotIn("compose up", calls)
+
+    def test_new_installer_release_advances_images_without_reentering_cloudflare_cert(self):
+        subprocess.run([
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(self.root / "origin.key"), "-out", str(self.root / "origin.pem"),
+            "-days", "1", "-subj", "/CN=rum.example.com",
+        ], check=True, capture_output=True, timeout=30)
+        initial = ["--domain", "rum.example.com", "--tls", "cloudflare",
+                   "--cert", "origin.pem", "--key", "origin.key", "--no-start", "--yes"]
+        self.assert_ok(self.run_installer(initial))
+        original_env = (self.dest / ".env").read_bytes()
+        cert = (self.dest / "traefik/ssl/cert.pem").read_bytes()
+        key = (self.dest / "traefik/ssl/key.pem").read_bytes()
+        current = f"bundle_version='{self.image_version}'".encode()
+        self.assertIn(current, self.script)
+        major, minor, patch = map(int, self.image_version.split("."))
+        next_version = f"{major}.{minor}.{patch + 1}"
+        next_installer = self.script.replace(current, f"bundle_version='{next_version}'".encode(), 1)
+        self.assert_ok(self.run_installer(["--no-start", "--yes"], script=next_installer))
+        upgraded_env = (self.dest / ".env").read_bytes()
+        self.assertEqual(upgraded_env, original_env.replace(
+            f"BASICRUM_VERSION={self.image_version}\n".encode(),
+            f"BASICRUM_VERSION={next_version}\n".encode(),
+        ))
+        self.assertEqual((self.dest / "traefik/ssl/cert.pem").read_bytes(), cert)
+        self.assertEqual((self.dest / "traefik/ssl/key.pem").read_bytes(), key)
+        self.assert_ok(self.run_installer(["--no-start", "--yes"], script=next_installer))
+        self.assertEqual((self.dest / ".env").read_bytes(), upgraded_env)
 
     def test_install_dir_with_spaces_and_unknown_option(self):
         dest = self.root / "path with spaces"
@@ -406,6 +437,22 @@ esac
         self.assert_ok(result)
         self.assertEqual((self.root / "key.pem").read_bytes(), (self.dest / "traefik/ssl/key.pem").read_bytes())
 
+    def test_cloudflare_alias_requires_matching_origin_certificate(self):
+        subprocess.run([
+            "openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", str(self.root / "origin.key"), "-out", str(self.root / "origin.pem"),
+            "-days", "1", "-subj", "/CN=rum.example.com",
+        ], check=True, capture_output=True, timeout=30)
+        flags = ["--tls", "cloudflare", "--cert", "origin.pem", "--key", "origin.key",
+                 "--no-start", "--yes"]
+        self.assert_ok(self.run_installer(["--domain", "rum.example.com", *flags]))
+        self.assertIn("TLS_MODE=custom", (self.dest / ".env").read_text())
+        before = (self.dest / ".env").read_bytes()
+        mismatch = self.run_installer(["--domain", "other.example.com", *flags])
+        self.assertNotEqual(mismatch.returncode, 0)
+        self.assertIn(b"certificate does not cover other.example.com", mismatch.stderr)
+        self.assertEqual((self.dest / ".env").read_bytes(), before)
+
     @unittest.skipUnless(REAL_DOCKER, "Docker CLI is needed for Compose validation")
     def test_real_compose_renders_expected_port_bindings(self):
         available = subprocess.run([REAL_DOCKER, "compose", "version"], capture_output=True, timeout=15)
@@ -437,7 +484,8 @@ esac
                     ("basicrum_beacon_service", "beacon_service_community"),
                     ("basicrum_frontend", "frontend_community"),
                 ):
-                    self.assertEqual(config["services"][service]["image"], f"basicrum/{repository}:0.0.1")
+                    self.assertEqual(config["services"][service]["image"],
+                                     f"basicrum/{repository}:{self.image_version}")
                 self.assertEqual(set(config["services"]["traefik"]["networks"]), {"proxy"})
                 for database in ("clickhouse", "basicrum_postgres"):
                     self.assertFalse(config["services"][database].get("ports"))
@@ -472,7 +520,7 @@ esac
             os.execvpe("bash", ["bash", "-c", 'cat "$1" | bash', "pipeline", str(self.installer)], self.env)
         transcript = b""
         responses = [(b"Public hostname of this Basicrum install", b"localhost\n"),
-                     (b"Choice [1]:", b"3\n")]
+                     (b"Choice [1]:", b"4\n")]
         deadline = time.monotonic() + 30
         status = None
         try:

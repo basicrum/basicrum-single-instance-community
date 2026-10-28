@@ -5,16 +5,18 @@
 #
 # The first run creates .env with generated secrets and writes the Traefik
 # configuration for the TLS mode you choose, then pulls the images and starts
-# the stack. Every later run keeps .env (it only adds keys that are missing),
-# re-derives the Traefik files from it, and converges the containers. Flags
-# override stored values; prompts appear only for values that are still
-# missing, and only when running in a terminal.
+# the stack. Every later run retains .env settings and secrets, re-derives the
+# Traefik files, and converges the containers. The downloadable installer
+# passes its bundled application version as a flag, which updates only that
+# version; other flags override stored values. Prompts appear only for values
+# that are still missing, and only when running in a terminal.
 #
 #   ./start.sh                                   interactive first run
 #   ./start.sh --domain rum.example.com --tls letsencrypt --email you@example.com
+#   ./start.sh --domain rum.example.com --tls cloudflare --cert origin.pem --key origin.key
 #   ./start.sh --domain rum.example.com --tls custom --cert fullchain.pem --key privkey.pem
 #   ./start.sh --domain rum.example.com --tls none --public-url https://rum.example.com
-#   ./start.sh --version 0.0.1               use the three community images
+#   ./start.sh --version <tag>               internal image-tag override
 #   ./start.sh --help
 #
 # Requirements are enforced by lib/preflight.sh before configuration changes.
@@ -57,9 +59,10 @@ Usage: ./start.sh [options]
 
 Site
   --domain NAME          public hostname, e.g. rum.example.com
-  --tls MODE             letsencrypt  Traefik obtains and renews a Let's Encrypt
+  --tls MODE             cloudflare   Cloudflare Origin CA certificate, Full (strict)
+                         letsencrypt  Traefik obtains and renews a Let's Encrypt
                                       certificate (DNS must point here; 80 and 443 open)
-                         custom       you supply a certificate and key (see --cert/--key)
+                         custom       another certificate and key (see --cert/--key)
                          none         plain HTTP; your own reverse proxy terminates TLS
   --email ADDRESS        contact address for Let's Encrypt (letsencrypt mode)
   --acme-staging         use Let's Encrypt's staging CA: test certificates, no rate limits
@@ -72,7 +75,7 @@ Site
   --https-port N         host port for HTTPS (default 443; letsencrypt and custom modes)
 
 Images and settings
-  --version TAG          shared tag for the three Basicrum images (default 0.0.1)
+  --version TAG          shared tag for the three Basicrum images (installer supplies it)
   --set KEY=VALUE        set any other .env key, repeatable
                          (e.g. --set TELEMETRY_EXPOSE=true)
 
@@ -196,9 +199,9 @@ valid_domain() {
 valid_port() { printf '%s' "$1" | grep -Eq '^[0-9]+$' && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
 normalize_tls() {
   case "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" in
-    1|letsencrypt|le|acme) printf 'letsencrypt' ;;
-    2|custom|cert|certificate) printf 'custom' ;;
-    3|none|http|plain) printf 'none' ;;
+    1|3|cloudflare|cf|custom|cert|certificate) printf 'custom' ;;
+    2|letsencrypt|le|acme) printf 'letsencrypt' ;;
+    4|none|http|plain) printf 'none' ;;
     *) printf '' ;;
   esac
 }
@@ -221,8 +224,9 @@ if [ ! -f "$ENV_FILE" ]; then
   cat > "$ENV_FILE" <<ENVTEMPLATE
 # Basicrum community install. Created by ./start.sh on $(date -u +%Y-%m-%dT%H:%MZ).
 # Keep this file private: it holds every secret of the installation.
-# Re-running ./start.sh keeps existing values and only adds missing keys; it
-# re-derives PUBLIC_URL, TRAEFIK_ENTRYPOINT and COMPOSE_FILE from the mode.
+# Re-running the installer keeps settings and secrets, except that its bundled
+# application image version updates BASICRUM_VERSION. It re-derives PUBLIC_URL,
+# TRAEFIK_ENTRYPOINT and COMPOSE_FILE from the mode.
 # Values must stay on one line, without inline comments.
 
 # ---- Site ------------------------------------------------------------------
@@ -307,22 +311,23 @@ valid_domain "$DOMAIN" || die "'$DOMAIN' is not a hostname"
 TLS_MODE="$(env_get TLS_MODE)"
 if [ -n "$ARG_TLS" ]; then
   TLS_MODE="$(normalize_tls "$ARG_TLS")"
-  [ -n "$TLS_MODE" ] || die "--tls must be letsencrypt, custom or none"
+  [ -n "$TLS_MODE" ] || die "--tls must be cloudflare, letsencrypt, custom or none"
 fi
 if [ -z "$TLS_MODE" ] && [ "$INTERACTIVE" = true ]; then
   info ""
   info "How should HTTPS work?"
-  info "  1) Let's Encrypt: Traefik obtains and renews the certificate."
+  info "  1) Cloudflare: use an Origin CA certificate with Full (strict) encryption."
+  info "  2) Let's Encrypt: Traefik obtains and renews the certificate."
   info "     DNS for $DOMAIN must point at this server and ports 80 and 443 must be reachable."
-  info "  2) Your own certificate and private key (for example a Cloudflare origin certificate)."
-  info "  3) None: plain HTTP, your own reverse proxy in front terminates TLS."
+  info "  3) Your own certificate and private key."
+  info "  4) None: plain HTTP, your own reverse proxy in front terminates TLS."
   while [ -z "$TLS_MODE" ]; do
     ask choice "Choice" "1"
     TLS_MODE="$(normalize_tls "$choice")"
-    [ -n "$TLS_MODE" ] || info "Please answer 1, 2 or 3."
+    [ -n "$TLS_MODE" ] || info "Please answer 1, 2, 3 or 4."
   done
 fi
-[ -n "$TLS_MODE" ] || die "no TLS mode: pass --tls letsencrypt|custom|none (or run interactively)"
+[ -n "$TLS_MODE" ] || die "no TLS mode: pass --tls cloudflare|letsencrypt|custom|none (or run interactively)"
 
 ACME_EMAIL="${ARG_EMAIL:-$(env_get ACME_EMAIL)}"
 if [ "$TLS_MODE" = letsencrypt ]; then
@@ -357,9 +362,10 @@ if [ "$TLS_MODE" = custom ]; then
     cert_pub="$(openssl x509 -noout -pubkey -in "$1" | openssl pkey -pubin -outform DER | openssl dgst -sha256 | awk '{print $NF}')"
     key_pub="$(openssl pkey -in "$2" -pubout -outform DER | openssl dgst -sha256 | awk '{print $NF}')"
     [ "$cert_pub" = "$key_pub" ] || die "the certificate and the private key do not belong together ($1, $2)"
-    if ! openssl x509 -noout -checkhost "$DOMAIN" -in "$1" >/dev/null 2>&1; then
-      warn "the certificate does not list $DOMAIN; browsers will warn (fine behind Cloudflare with an origin certificate)"
-    fi
+    openssl x509 -noout -checkhost "$DOMAIN" -in "$1" >/dev/null 2>&1 \
+      || die "the certificate does not cover $DOMAIN; Cloudflare Full (strict) and browsers require a matching hostname"
+    openssl x509 -noout -checkend 0 -in "$1" >/dev/null 2>&1 \
+      || die "the certificate has expired; Cloudflare Full (strict) and browsers require a valid certificate"
     ok "certificate pair checked: $(openssl x509 -noout -enddate -in "$1" | sed 's/notAfter=/valid until /')"
   }
   if [ -n "$ARG_CERT" ]; then
@@ -580,9 +586,9 @@ ok "docker compose config is valid"
 
 if [ "$NO_START" = true ]; then
   info ""
-  info "Configuration written, nothing started (--no-start). Start with:"
-  info "  ./start.sh            or            docker compose up -d --wait"
-  info "Image execution, Docker data disk, port/DNS and endpoint checks run when ./start.sh starts services."
+  info "Configuration written, nothing started (--no-start). Rerun the installer"
+  info "without --no-start (and with the same --install-dir, if used) to start services."
+  info "Image execution, Docker data disk, port/DNS and endpoint checks run then."
   exit 0
 fi
 
@@ -661,7 +667,7 @@ case "$TLS_MODE" in
     info "  Certificate:      Traefik requests it from Let's Encrypt now and renews it itself;"
     info "                    'docker compose logs traefik' shows the ACME exchange." ;;
   custom)
-    info "  Certificate:      $SSL_DIR/cert.pem (replace both files and re-run ./start.sh to rotate)" ;;
+    info "  Certificate:      $SSL_DIR/cert.pem (rerun the installer with --cert and --key to rotate)" ;;
   none)
     info "  HTTP:             $(env_get HTTP_BIND | sed 's/^$/every address/'):$HTTP_PORT, plain. Point your reverse proxy at it,"
     info "                    forward the Host header unchanged, and make $PUBLIC_URL reach it." ;;
@@ -683,7 +689,7 @@ First run
 Day to day
   docker compose ps                         state of the six containers
   docker compose logs -f basicrum_backend   follow one service's log
-  ./start.sh --version <tag>                move to another image tag, then converge
+  Rerun the latest installer command to apply image and configuration updates.
   docker compose down                       stop (data stays in the named volumes)
 
 FIRSTRUN

@@ -8,7 +8,7 @@ timings per site.
 
 This repository installs the whole stack on **one server** with Docker Compose.
 It is the same six-container shape that runs the public demo at
-demo.playground.basicrum.com, with generic configuration: `start.sh` generates
+demo.playground.basicrum.com, with generic configuration: the installer generates
 every secret, writes the Traefik configuration for the TLS mode you pick, and
 brings the stack up.
 
@@ -46,8 +46,9 @@ mappings and share an internal Docker network with the services that use them.
   host. ClickHouse's memory cap is 70 % of host RAM. Docker data storage needs
   **20 GiB free**; the installation directory needs 100 MiB free. Disk usage
   grows with traffic.
-- A hostname whose DNS points at the server, and either ports 80 and 443 open
-  (Let's Encrypt), your own certificate, or your own reverse proxy in front.
+- A hostname configured to reach the server, directly or through Cloudflare,
+  and either ports 80 and 443 open (Let's Encrypt), your own certificate, or
+  your own reverse proxy in front.
 - Bash 3.2+, OpenSSL, curl, and standard Unix utilities. Linux also needs `ss`
   (iproute2) and `getent` (libc utilities); macOS uses its built-in `lsof` and
   `dscacheutil` for port and hostname checks.
@@ -63,17 +64,12 @@ curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releas
 ```
 
 The [releases page](https://github.com/basicrum/basicrum-single-instance-community/releases)
-also provides `install.sh` and its `install.sh.sha256` checksum. To build the
-same self-contained installer from this checkout instead:
-
-```bash
-python3 scripts/build-installer.py
-bash dist/install.sh
-```
+also provides `install.sh` and its `install.sh.sha256` checksum.
 
 The installer unpacks the required files into `~/basicrum`, then runs the
 existing setup. It asks for your hostname, TLS mode, and any needed certificate
-details through the terminal, including when Bash is reading the script from
+details through the terminal. The first TLS choice is Cloudflare with an Origin
+CA certificate. Prompts work even when Bash is reading the script from
 a pipe. Docker must already be installed and running. Running a prebuilt
 `install.sh` does not require Git, Python, or a source checkout; building it
 from this repository does. The host requirements above are checked before the
@@ -84,56 +80,52 @@ For an unattended installation, pass the settings as arguments:
 ```bash
 curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash -s -- \
   --install-dir "$HOME/basicrum" \
-  --domain rum.example.com --tls letsencrypt --email you@example.com --yes
+  --domain rum.example.com --tls cloudflare \
+  --cert /root/basicrum-origin.pem --key /root/basicrum-origin.key --yes
 ```
 
-All `start.sh` flags are accepted, including `--no-start` to write and validate
+Installer flags include `--no-start` to write and validate
 configuration without pulling images or starting containers. Relative
 certificate paths are resolved from the directory where you invoke setup.
 
-Re-running the installer refreshes its packaged scripts, README, Compose files,
-and ClickHouse configuration. It retains `.env`, certificates, and
-Docker volumes. It refuses a nonempty destination that it did not previously
-create; select a new directory instead of pointing it at a source checkout.
-For routine configuration changes or application upgrades, use the installed
-`~/basicrum/start.sh`, which keeps your existing settings and secrets.
+**To upgrade, run the same download command again.** Each published installer
+contains one tested tag shared by the backend, frontend and beacon images. A
+rerun applies that tag, refreshes the packaged configuration, and starts the
+stack. It keeps the hostname, TLS settings, generated secrets, Cloudflare
+certificate and key, and Docker volumes. It refuses a nonempty destination
+that it did not previously create.
 
-### Install from a local copy
-
-```bash
-# In your downloaded or cloned copy of this repository:
-./start.sh
-```
-
-Run in a terminal, `start.sh` asks for the hostname and the TLS mode and
-everything else is generated. The same without prompts:
+### Other first-run TLS choices
 
 ```bash
 # Let's Encrypt: Traefik obtains and renews the certificate itself
-./start.sh --domain rum.example.com --tls letsencrypt --email you@example.com
+curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash -s -- \
+  --domain rum.example.com --tls letsencrypt --email you@example.com --yes
 
-# your own certificate and key (for example a Cloudflare origin certificate)
-./start.sh --domain rum.example.com --tls custom --cert fullchain.pem --key privkey.pem
+# another certificate and key
+curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash -s -- \
+  --domain rum.example.com --tls custom --cert fullchain.pem --key privkey.pem --yes
 
 # plain HTTP on 127.0.0.1:8080, your own reverse proxy terminates TLS
-./start.sh --domain rum.example.com --tls none --http-port 8080 --public-url https://rum.example.com
+curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash -s -- \
+  --domain rum.example.com --tls none --http-port 8080 --public-url https://rum.example.com --yes
 ```
 
-What `start.sh` does, in order:
+What the installer does, in order:
 
 1. Runs the shared preflight checks: tools, local Docker context, daemon access,
    Engine/CLI/API/Compose minimum versions, Linux container support, architecture,
    CPU/RAM allocation, and installation disk space. These run before `.env` is
    created or changed. The downloadable installer runs the same checks before
    updating installed scripts.
-2. Creates `.env` (mode 600) with a password for Postgres and ClickHouse and
-   the four application secrets, each from `openssl rand`; defaults every
-   other variable. **Re-runs keep every existing value** and only add keys
-   that are missing, so an upgrade of this repository never rewrites a secret.
-   Flags override stored values, prompts appear only for values still missing.
+2. Creates `.env` (mode 600) with generated database passwords and application
+   secrets. **Re-runs keep settings and secrets**, adding missing values and
+   setting the shared application image tag to the version bundled in the
+   latest installer. Flags override stored settings; prompts appear only for
+   settings still missing.
 3. Writes `traefik/traefik.yml` (and `traefik/dynamic/tls.yml` in custom mode)
    from `.env`. These two files are derived: change `.env` or pass flags and
-   re-run, do not edit them.
+   rerun the installer; do not edit them.
 4. Validates with `docker compose config`, checks published ports for conflicts
    (allowing ports owned by this installation), and checks hostname resolution
    in Let's Encrypt mode. It pulls the images, then runs temporary, isolated
@@ -153,7 +145,8 @@ What `start.sh` does, in order:
    (about 1 GB of images).
 7. Prints the dashboard URL, the beacon endpoint and the first-run steps.
 
-`./start.sh --help` lists every flag; `--no-start` writes and validates the
+`curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash -s -- --help`
+lists every flag; `--no-start` writes and validates the
 configuration without starting anything. It still enforces host and version
 requirements; image execution, Docker VM disk space, port/DNS checks and endpoint
 readiness are checked when setup starts services. DNS resolution alone does not
@@ -181,11 +174,36 @@ the public HTTPS check confirms the observable HTTPS result after startup.
 
    then run the simulator from the Basicrum monorepo (`beacon_simulator/`)
    against `https://rum.example.com/beacon/catcher`. Backfilling past dates
-   needs `ALLOW_BEACON_TIMESTAMP_OVERRIDE=yes` in `.env` (and a re-run of
-   `./start.sh`); turn it back to `no` afterwards, it lets any client set the
+   needs `ALLOW_BEACON_TIMESTAMP_OVERRIDE=yes` in `.env` (and a rerun of the
+   installer); turn it back to `no` afterwards, it lets any client set the
    timestamp of its beacons.
 
 ## TLS modes
+
+### Cloudflare proxy
+
+Use a [proxied DNS record](https://developers.cloudflare.com/dns/proxy-status/)
+for the Basicrum hostname and create an [Origin CA certificate](https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/)
+that covers it. Save the certificate and private key on the origin server,
+outside this repository, then choose option 1 in the interactive installer or
+pass `--tls cloudflare --cert /path/to/origin.pem --key /path/to/origin.key`.
+Set Cloudflare SSL/TLS to [Full (strict)](https://developers.cloudflare.com/ssl/origin-configuration/ssl-modes/full-strict/).
+Traefik serves HTTPS on the origin's port 443 and redirects HTTP on port 80.
+The application URL is `https://` plus the hostname. Internally, `cloudflare`
+uses the same certificate configuration as `custom`.
+
+Allow inbound web traffic to the origin from [Cloudflare's published IP ranges](https://developers.cloudflare.com/fundamentals/security/protect-your-origin-server/),
+while retaining your own SSH access. To preserve visitor IPs for beacon GeoIP,
+set `TRAEFIK_TRUSTED_PROXY_IPS` in `.env` to those IPv4 and IPv6 CIDRs as a
+comma-separated list and rerun the installer; keep the list current. Without it,
+the application may see Cloudflare's edge IP instead. The installer checks the
+certificate/key pair and hostname, and checks local HTTPS readiness. Verify
+`https://rum.example.com/auth/login` through Cloudflare after installation;
+the local check cannot establish that Cloudflare can reach the origin.
+
+Cloudflare Origin CA certificates are trusted by Cloudflare, not by browsers
+connecting directly to the origin. Use a publicly trusted certificate if the
+hostname also needs to work without Cloudflare.
 
 ### `letsencrypt`
 
@@ -203,19 +221,17 @@ switching back to production.
 ### `custom`
 
 You bring the certificate (PEM, with its intermediate chain) and the private
-key. `start.sh` copies them to `traefik/ssl/cert.pem` and `traefik/ssl/key.pem`
+key. The installer copies them to `traefik/ssl/cert.pem` and `traefik/ssl/key.pem`
 (key mode 600), checks that they belong together and that the certificate
 names the domain, and writes `traefik/dynamic/tls.yml`, which serves the pair
 for every hostname. HTTP is redirected to HTTPS.
 
-To rotate: replace the two files (or pass `--cert`/`--key` again) and re-run
-`./start.sh`. The dynamic file is written again, Traefik's file watcher reloads
+To rotate, rerun the installer with `--cert` and `--key` pointing to the new
+pair. The dynamic file is written again, Traefik's file watcher reloads
 within a second, no container restarts.
 
-A Cloudflare origin certificate (Cloudflare dashboard → SSL/TLS → Origin
-Server) is a good fit when the site is proxied through Cloudflare with the
-*Full (strict)* mode: it is trusted by Cloudflare's edge only, so `start.sh`
-warns about the hostname check only when the certificate does not cover it.
+`--tls cloudflare` is an alias for this mode. A certificate that does not cover
+the configured hostname fails setup.
 
 ### `none`
 
@@ -234,7 +250,7 @@ TLS and forwards to it. Three things matter:
   headers from any client, which is safe while only your proxy can reach the
   port. If the proxy runs on another machine, set `HTTP_BIND=` (empty, every
   address) and `TRAEFIK_TRUSTED_PROXY_IPS=<its address>` in `.env`, then
-  re-run `./start.sh`.
+  rerun the installer.
 
 nginx, for example:
 
@@ -274,8 +290,8 @@ Volumes: `postgres-data`, `clickhouse-data`, and `traefik-acme`
 
 ## Configuration
 
-Everything lives in `.env`. After changing a value run `./start.sh` (or
-`docker compose up -d`) to apply it; secrets never change on a re-run. A value
+Everything lives in `.env`. After changing a value, rerun the installer to
+apply it; secrets never change on a rerun. A value
 that is part of a container's environment (`PUBLIC_URL`, `DOMAIN`, the
 options below) recreates that container, a few seconds of downtime for it;
 a TLS mode or port change recreates Traefik only.
@@ -284,14 +300,14 @@ a TLS mode or port change recreates Traefik only.
 |----------|---------|---------|---------|
 | `DOMAIN` | asked | traefik | hostname the routers match |
 | `PUBLIC_URL` | derived | backend, frontend | how browsers reach the site; `APP_BASE_URL`, `AUTH_URL`, `NEXT_PUBLIC_API_URL` and the beacon endpoint come from it |
-| `TLS_MODE` | asked | start.sh | `letsencrypt`, `custom` or `none` |
+| `TLS_MODE` | asked | start.sh | `letsencrypt`, `custom` or `none`; `--tls cloudflare` selects `custom` |
 | `ACME_EMAIL` | asked | traefik | Let's Encrypt contact address |
 | `ACME_STAGING` | `false` | traefik | `true` uses Let's Encrypt's staging CA |
 | `HTTP_PORT`, `HTTPS_PORT` | `80`, `443` | traefik | published host ports |
 | `HTTP_BIND` | empty, `127.0.0.1` in `none` mode | traefik | address the HTTP port binds to; empty means every address |
 | `TRAEFIK_TRUSTED_PROXY_IPS` | empty | traefik | comma-separated addresses or CIDRs whose `X-Forwarded-*` headers are trusted |
 | `TRAEFIK_ENTRYPOINT`, `COMPOSE_FILE` | derived | compose | `web`/`websecure`; whether `compose.https.yml` is included. Do not edit |
-| `BASICRUM_VERSION` | `0.0.1` | the three app images | shared tag for the backend, frontend and beacon service |
+| `BASICRUM_VERSION` | release-bundled tag | the three app images | shared tag for the backend, frontend and beacon service; updated on every installer run |
 | `TRAEFIK_VERSION` | `v3.7.16` | traefik | pinned patch of the 3.7 series; supports Docker API version negotiation |
 | `POSTGRES_VERSION` | `17.5` | postgres | see Upgrading before changing the major version |
 | `CLICKHOUSE_VERSION` | `26.8.34.13-alpine` | clickhouse | pinned patch of the 26.8 LTS series |
@@ -323,20 +339,27 @@ docker compose ps                          # the six containers and their health
 docker compose logs -f basicrum_backend    # follow one service
 docker compose restart basicrum_frontend   # restart one service
 docker compose down                        # stop everything; data stays in the volumes
-./start.sh                                 # start again / converge after editing .env
+curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash
 ```
 
 ### Upgrading
 
 The installer uses `basicrum/backend_community`,
 `basicrum/frontend_community` and `basicrum/beacon_service_community`, all at
-tag `0.0.1`. The three images share the API contract, so move them together
-with `BASICRUM_VERSION` when a newer matching tag is published:
+the tag bundled with the current release. The three images share the API
+contract and move together. When a new installer release is published with a
+new shared tag, run the same command used for the first installation:
 
 ```bash
-./start.sh --version 0.0.2                  # example: only after all three images have this tag
-docker compose logs basicrum_backend | grep -i migrat
+curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash
 ```
+
+For a nondefault installation directory, repeat the same `--install-dir`
+argument. The release workflow pulls and tests all three application images
+before publication. On an installed server, rerunning the installer updates
+only the shared application tag; the stored database, Traefik and other image
+versions stay pinned. Check `docker compose logs basicrum_backend` for
+migration output after the update.
 
 The backend applies its Postgres and ClickHouse migrations when it starts, so a
 newer version migrates the data forward on its own. Going back to an older tag
@@ -346,10 +369,10 @@ not undo database migrations. Prefer an explicit matching tag over `latest`.
 New installations default to Traefik `v3.7.16` and ClickHouse
 `26.8.34.13-alpine` (26.8 LTS). Existing installations retain the
 `TRAEFIK_VERSION` and `CLICKHOUSE_VERSION` stored in `.env` when setup is
-re-run; an installer update does not automatically upgrade these services.
+rerun; an installer update does not automatically upgrade these services.
 
 Traefik and ClickHouse minor versions can be bumped by editing
-`TRAEFIK_VERSION` and `CLICKHOUSE_VERSION` and re-running `./start.sh` (read the
+`TRAEFIK_VERSION` and `CLICKHOUSE_VERSION` and rerunning the installer (read the
 release notes first). **Postgres major versions cannot be bumped that way**: a
 17 data directory does not start under 18. A major-version upgrade needs a
 separate database migration procedure.
@@ -394,7 +417,7 @@ own metrics on 9363 with one more file in `clickhouse-config/`, mounted into
 
 ## Troubleshooting
 
-- **`start.sh` stops at "the stack did not come up healthy"**: `docker compose
+- **The installer stops at "the stack did not come up healthy"**: `docker compose
   ps` shows which container is unhealthy, `docker compose logs --tail=100
   <service>` why. The backend logs its migrations; the beacon service needs
   ClickHouse; the frontend answers `/auth/login` once Next.js is up.
@@ -408,12 +431,12 @@ own metrics on 9363 with one more file in `clickhouse-config/`, mounted into
   (use `--acme-staging` to rehearse).
 - **Sign-in fails or loops, the dashboard shows "server unreachable"**:
   `PUBLIC_URL` does not match what the browser uses. Fix it in `.env` (or
-  `--public-url`) and re-run `./start.sh`.
+  pass `--public-url`) and rerun the installer.
 - **Traefik answers 404 for everything** and `docker compose logs traefik`
   repeats "Failed to retrieve information of the docker client and server
   host": the Traefik version is older than 3.6 on a Docker Engine 29 daemon,
   whose API floor refuses the API 1.24 those versions pin. Set
-  `TRAEFIK_VERSION=v3.7.16` (or newer) in `.env` and re-run `./start.sh`.
+  `TRAEFIK_VERSION=v3.7.16` (or newer) in `.env` and rerun the installer.
 - **"AMD64 backend image cannot execute"**: the Docker daemon cannot execute
   the application's AMD64 image. Configure AMD64 emulation or use an AMD64 host.
 - **"ClickHouse image cannot execute"**: check the CPU requirements for the
@@ -498,7 +521,7 @@ curl -fsSL http://127.0.0.1:8765/install.sh | bash -s -- \
 ```
 
 This writes and validates the preview configuration without starting services.
-Omit `--no-start` to run it, or run `~/basicrum-preview/start.sh` later.
+Omit `--no-start` on a later run of the same installer command to start it.
 
 ## CI and installer releases
 
@@ -511,6 +534,12 @@ not start the application containers.
 
 `.github/workflows/release.yml` is a manually triggered **Prepare installer
 release** workflow:
+
+For an application image update, publish the same new tag in all three
+community image repositories and change `DEFAULT_BASICRUM_VERSION` in
+`start.sh` before preparing the installer release. The builder embeds that
+tag in `install.sh`; the release workflow pulls and smoke tests it. Installer
+release tags and application image tags are separate version numbers.
 
 1. Push a stable version tag such as `v1.0.0` pointing to a commit in the
    default branch's history. That commit must include these CI scripts.

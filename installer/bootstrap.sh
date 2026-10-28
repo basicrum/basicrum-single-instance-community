@@ -12,7 +12,7 @@ basicrum_install() (
     cat <<'HELP'
 Basicrum community installer
 
-Usage: bash install.sh [--install-dir DIR] [start.sh options]
+Usage: bash install.sh [--install-dir DIR] [options]
 
 Installs into ~/basicrum by default, then asks for a hostname and TLS mode.
 Requires Docker Engine 20.10.10+ (API 1.40+), Compose 2.24+, Bash 3.2+,
@@ -20,13 +20,13 @@ OpenSSL, curl, 2 CPUs, and 4 GiB RAM allocated to Docker.
 
   --install-dir DIR       Where to keep this installation
   --domain NAME           Public hostname (e.g. rum.example.com)
-  --tls MODE              letsencrypt, custom, or none
+  --tls MODE              cloudflare (Origin CA), letsencrypt, custom, or none
   --email ADDRESS         Contact address for Let's Encrypt
-  --cert FILE --key FILE  Certificate and private key for custom TLS
+  --cert FILE --key FILE  Certificate and private key for cloudflare or custom TLS
   --public-url URL        Browser-facing URL when using your own reverse proxy
   --http-port PORT        HTTP port (default 80)
   --https-port PORT       HTTPS port (default 443)
-  --version TAG           Application image tag
+  --version TAG           Override this release's application image tag
   --set KEY=VALUE         Additional setting; may be repeated
   --acme-staging          Use Let's Encrypt's staging CA
   --no-start              Write and validate configuration without starting
@@ -34,15 +34,18 @@ OpenSSL, curl, 2 CPUs, and 4 GiB RAM allocated to Docker.
   -y, --yes               Never prompt; supply required settings as flags
   -h, --help              Show this help
 
-Re-running refreshes the packaged files. Existing .env settings, certificates,
-and Docker volumes are preserved. Use ./start.sh for routine changes.
+Re-running the latest installer applies its application image tag and refreshes
+the packaged files. Existing settings, secrets, certificates, and Docker
+volumes are preserved.
 HELP
   }
 
+  bundle_version='@BASICRUM_VERSION@'
   install_dir="${HOME:?HOME must be set}/basicrum"
   original_dir="$PWD"
   start_args=()
   assume_yes=false
+  version_requested=false
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --install-dir)
@@ -60,10 +63,16 @@ HELP
         [ -n "$cert_path" ] || die "$option needs a path"
         case "$cert_path" in /*) ;; *) cert_path="$original_dir/$cert_path" ;; esac
         start_args+=("$option" "$cert_path"); shift ;;
-      --domain|--tls|--email|--public-url|--http-port|--https-port|--version|--set)
+      --version)
+        [ "$#" -ge 2 ] && [ -n "$2" ] || die '--version needs a value'
+        start_args+=("$1" "$2"); version_requested=true; shift 2 ;;
+      --version=*)
+        [ -n "${1#*=}" ] || die '--version needs a value'
+        start_args+=("$1"); version_requested=true; shift ;;
+      --domain|--tls|--email|--public-url|--http-port|--https-port|--set)
         [ "$#" -ge 2 ] && [ -n "$2" ] || die "$1 needs a value"
         start_args+=("$1" "$2"); shift 2 ;;
-      --domain=*|--tls=*|--email=*|--public-url=*|--http-port=*|--https-port=*|--version=*|--set=*|--acme-staging|--no-start|--no-pull)
+      --domain=*|--tls=*|--email=*|--public-url=*|--http-port=*|--https-port=*|--set=*|--acme-staging|--no-start|--no-pull)
         start_args+=("$1"); shift ;;
       -y|--yes)
         assume_yes=true; start_args+=("$1"); shift ;;
@@ -71,6 +80,7 @@ HELP
       *) die "unknown option: $1 (use --help)" ;;
     esac
   done
+  [ "$version_requested" = true ] || start_args+=(--version "$bundle_version")
   [ -n "$install_dir" ] || die '--install-dir needs a directory'
   case "$install_dir" in /*) ;; *) install_dir="$original_dir/$install_dir" ;; esac
 
@@ -127,7 +137,7 @@ HELP
   printf '%s\n' 'basicrum-community-v1' > "$install_dir/$marker"
 
   printf '\nBasicrum files installed in %s\n' "$install_dir"
-  printf 'For future configuration changes: cd %q && ./start.sh\n\n' "$install_dir"
+  printf 'Rerun the latest installer to apply future updates.\n\n'
   # Keep the caller's directory for relative certificate paths entered at
   # prompts; start.sh records it before changing to its own directory. The
   # guarded array expansion also works with empty arrays on Bash 3.2.
