@@ -246,9 +246,8 @@ TRAEFIK_ENTRYPOINT=
 COMPOSE_FILE=
 
 # ---- Versions --------------------------------------------------------------
-# Shared tag and repository suffix for the three Basicrum application images.
+# Shared tag for the three Basicrum community application images.
 BASICRUM_VERSION=
-BASICRUM_IMAGE_SUFFIX=_community
 TRAEFIK_VERSION=
 POSTGRES_VERSION=
 CLICKHOUSE_VERSION=
@@ -403,23 +402,7 @@ fi
 env_has HTTP_BIND || env_set HTTP_BIND ""
 env_has TRAEFIK_TRUSTED_PROXY_IPS || env_set TRAEFIK_TRUSTED_PROXY_IPS ""
 
-# Installations created before the community image repositories existed keep
-# their original image names and tag. A semantic --version switches all three
-# images to the community repositories; a sha-* tag switches back to legacy.
-if ! env_has BASICRUM_IMAGE_SUFFIX; then
-  if [ "$FIRST_RUN" = true ]; then env_set BASICRUM_IMAGE_SUFFIX _community
-  else env_set BASICRUM_IMAGE_SUFFIX ""; fi
-fi
-if [ -n "$ARG_VERSION" ]; then
-  env_set BASICRUM_VERSION "$ARG_VERSION"
-  case "$ARG_VERSION" in
-    sha-*) env_set BASICRUM_IMAGE_SUFFIX "" ;;
-    *)
-      if printf '%s' "$ARG_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-        env_set BASICRUM_IMAGE_SUFFIX _community
-      fi ;;
-  esac
-fi
+[ -n "$ARG_VERSION" ] && env_set BASICRUM_VERSION "$ARG_VERSION"
 env_default BASICRUM_VERSION "$DEFAULT_BASICRUM_VERSION"
 env_default TRAEFIK_VERSION "$DEFAULT_TRAEFIK_VERSION"
 env_default POSTGRES_VERSION "$DEFAULT_POSTGRES_VERSION"
@@ -459,11 +442,6 @@ if [ -n "$ARG_SETS" ]; then
     env_set "$key" "$value"
   done <<< "$ARG_SETS"
 fi
-case "$(env_get BASICRUM_IMAGE_SUFFIX)" in
-  ''|_community) ;;
-  *) die 'BASICRUM_IMAGE_SUFFIX must be empty (legacy) or _community' ;;
-esac
-
 # Derived values.
 PUBLIC_URL="$(env_get PUBLIC_URL)"
 if [ -n "$ARG_PUBLIC_URL" ]; then
@@ -622,7 +600,7 @@ if [ "$NO_PULL" = false ]; then
 fi
 
 step "Checking image execution and Docker storage"
-preflight_images "basicrum/backend$(env_get BASICRUM_IMAGE_SUFFIX):$(env_get BASICRUM_VERSION)" "clickhouse/clickhouse-server:$(env_get CLICKHOUSE_VERSION)"
+preflight_images "basicrum/backend_community:$(env_get BASICRUM_VERSION)" "clickhouse/clickhouse-server:$(env_get CLICKHOUSE_VERSION)"
 
 step "Starting the stack (waiting for health checks, up to ${WAIT_TIMEOUT_SECONDS}s)"
 traefik_existed=""
@@ -676,7 +654,7 @@ cat <<SUMMARY
 
   Dashboard:        $PUBLIC_URL
   Beacon endpoint:  $PUBLIC_URL/beacon/catcher
-  Images:           basicrum/{backend,frontend,beacon_service}$(env_get BASICRUM_IMAGE_SUFFIX):$(env_get BASICRUM_VERSION)
+  Images:           basicrum/{backend,frontend,beacon_service}_community:$(env_get BASICRUM_VERSION)
 SUMMARY
 case "$TLS_MODE" in
   letsencrypt)

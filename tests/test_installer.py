@@ -69,7 +69,7 @@ case "$*" in
   'compose up '*) exit "${TEST_UP_STATUS:-0}" ;;
   'ps -aq') printf '%s\\n' "${TEST_RUNNING_CONTAINER:-}" ;;
   'inspect --format '*) printf '%s\\n' "${TEST_CONTAINER_RECORD:-}" ;;
-  'run '*basicrum/backend*:*) exit "${TEST_EMULATION_STATUS:-0}" ;;
+  'run '*basicrum/backend_community:*) exit "${TEST_EMULATION_STATUS:-0}" ;;
   'run '*clickhouse/clickhouse-server:*) printf '%s\\n' "${TEST_DOCKER_DISK_KIB:-52428800}"; exit "${TEST_CLICKHOUSE_STATUS:-0}" ;;
   *) printf 'Unexpected Docker call: %s\\n' "$*" >&2; exit 90 ;;
 esac
@@ -130,7 +130,6 @@ esac
         self.assert_ok(self.run_installer())
         before = (self.dest / ".env").read_bytes()
         self.assertIn(b"BASICRUM_VERSION=0.0.1\n", before)
-        self.assertIn(b"BASICRUM_IMAGE_SUFFIX=_community\n", before)
         self.assertEqual((self.dest / ".env").stat().st_mode & 0o777, 0o600)
         for name in ("user-data/sentinel", "traefik/ssl/cert.pem", "traefik/ssl/key.pem"):
             path = self.dest / name
@@ -143,23 +142,6 @@ esac
         calls = (self.root / "docker.log").read_text()
         self.assertNotIn("compose pull", calls)
         self.assertNotIn("compose up", calls)
-
-    def test_existing_install_keeps_legacy_images_until_version_switch(self):
-        self.assert_ok(self.run_installer())
-        env = self.dest / ".env"
-        old = env.read_text().replace("BASICRUM_VERSION=0.0.1", "BASICRUM_VERSION=sha-a8290f2520ed")
-        old = old.replace("BASICRUM_IMAGE_SUFFIX=_community\n", "")
-        env.write_text(old)
-
-        self.assert_ok(self.run_installer(["--no-start", "--yes"]))
-        kept = env.read_text()
-        self.assertIn("BASICRUM_VERSION=sha-a8290f2520ed\n", kept)
-        self.assertIn("BASICRUM_IMAGE_SUFFIX=\n", kept)
-
-        self.assert_ok(self.run_installer(["--version", "0.0.1", "--no-start", "--yes"]))
-        switched = env.read_text()
-        self.assertIn("BASICRUM_VERSION=0.0.1\n", switched)
-        self.assertIn("BASICRUM_IMAGE_SUFFIX=_community\n", switched)
 
     def test_install_dir_with_spaces_and_unknown_option(self):
         dest = self.root / "path with spaces"

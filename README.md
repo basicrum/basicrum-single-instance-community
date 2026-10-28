@@ -290,7 +290,6 @@ a TLS mode or port change recreates Traefik only.
 | `TRAEFIK_TRUSTED_PROXY_IPS` | empty | traefik | comma-separated addresses or CIDRs whose `X-Forwarded-*` headers are trusted |
 | `TRAEFIK_ENTRYPOINT`, `COMPOSE_FILE` | derived | compose | `web`/`websecure`; whether `compose.https.yml` is included. Do not edit |
 | `BASICRUM_VERSION` | `0.0.1` | the three app images | shared tag for the backend, frontend and beacon service |
-| `BASICRUM_IMAGE_SUFFIX` | `_community` on new installs | the three app images | repository suffix; empty keeps the legacy image repositories on existing installs |
 | `TRAEFIK_VERSION` | `v3.7.16` | traefik | pinned patch of the 3.7 series; supports Docker API version negotiation |
 | `POSTGRES_VERSION` | `17.5` | postgres | see Upgrading before changing the major version |
 | `CLICKHOUSE_VERSION` | `26.8.34.13-alpine` | clickhouse | pinned patch of the 26.8 LTS series |
@@ -327,7 +326,7 @@ docker compose down                        # stop everything; data stays in the 
 
 ### Upgrading
 
-New installations use `basicrum/backend_community`,
+The installer uses `basicrum/backend_community`,
 `basicrum/frontend_community` and `basicrum/beacon_service_community`, all at
 tag `0.0.1`. The three images share the API contract, so move them together
 with `BASICRUM_VERSION` when a newer matching tag is published:
@@ -336,13 +335,6 @@ with `BASICRUM_VERSION` when a newer matching tag is published:
 ./start.sh --version 0.0.2                  # example: only after all three images have this tag
 docker compose logs basicrum_backend | grep -i migrat
 ```
-
-Existing installations with a `sha-*` tag keep the original `basicrum/backend`,
-`basicrum/frontend` and `basicrum/beacon_service` repositories when the
-installer is re-run. To switch an existing installation to the community
-images, run `./start.sh --version 0.0.1`; this changes the three repositories
-and their shared tag together. The stored `BASICRUM_IMAGE_SUFFIX` is empty for
-legacy images and `_community` for the new repositories.
 
 The backend applies its Postgres and ClickHouse migrations when it starts, so a
 newer version migrates the data forward on its own. Going back to an older tag
