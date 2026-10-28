@@ -1,5 +1,29 @@
 # Basicrum, single-server community edition
 
+## HTTPS setup
+
+Choose how HTTPS will be configured before installing:
+
+- **Cloudflare:** use a proxied DNS record, create an Origin CA certificate for
+  your hostname, and set Cloudflare SSL/TLS to **Full (strict)**. Then run:
+
+  ```bash
+  curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash -s -- \
+    --domain rum.example.com --tls cloudflare \
+    --cert /path/to/origin.pem --key /path/to/origin.key --yes
+  ```
+
+- **Let's Encrypt:** point the hostname to this server and allow inbound ports
+  80 and 443. Traefik obtains and renews the certificate automatically:
+
+  ```bash
+  curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash -s -- \
+    --domain rum.example.com --tls letsencrypt --email you@example.com --yes
+  ```
+
+See [Cloudflare proxy](#cloudflare-proxy) and [Let's Encrypt](#letsencrypt)
+for certificate, DNS, and troubleshooting details.
+
 ## Install or update
 
 Run this command on the server. Docker must already be installed and running.
