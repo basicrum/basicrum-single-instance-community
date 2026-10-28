@@ -279,7 +279,11 @@ esac
         self.assertNotIn("compose pull", (self.root / "docker.log").read_text())
 
     def test_conflicting_configured_ports_are_rejected(self):
-        result = self.run_installer([flag for flag in self.flags if flag != "--no-start"] + ["--set", "CLICKHOUSE_HTTP_PORT=8080"])
+        result = self.run_installer([
+            "--domain", "rum.example.com", "--tls", "letsencrypt",
+            "--email", "admin@example.com", "--http-port", "8080",
+            "--https-port", "8080", "--yes",
+        ])
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b"bindings overlap", result.stderr)
 
@@ -427,6 +431,12 @@ esac
                 http = next(port for port in ports if port["target"] == 80)
                 self.assertEqual(http.get("host_ip"), expected_host)
                 self.assertEqual(any(port["target"] == 443 for port in ports), https)
+                self.assertEqual(set(config["services"]["traefik"]["networks"]), {"proxy"})
+                for database in ("clickhouse", "basicrum_postgres"):
+                    self.assertFalse(config["services"][database].get("ports"))
+                    self.assertEqual(config["services"][database]["labels"]["traefik.enable"], "false")
+                    self.assertEqual(set(config["services"][database]["networks"]), {"internal"})
+                self.assertTrue(config["networks"]["internal"]["internal"])
                 self.assertEqual(len(config["services"]), 6)
 
     @unittest.skipUnless(REAL_CURL, "curl is needed for the local HTTP check")

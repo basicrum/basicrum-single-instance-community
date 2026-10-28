@@ -16,7 +16,7 @@
 #   basicrum_beacon_service beacon ingestion (Rust), writes to ClickHouse
 #   basicrum_frontend       the dashboard (Next.js), talks to the backend over the proxy network
 #   basicrum_postgres       users, organizations, sites
-#   clickhouse              RUM events; published on 127.0.0.1 only
+#   clickhouse              RUM events; no host port
 #
 # Networks: `proxy` carries Traefik and everything it routes to; `internal`
 # carries the databases and the two services that write to them.
@@ -205,6 +205,8 @@ services:
       start_period: 10s
     networks:
       - internal
+    labels:
+      - "traefik.enable=false"
 
   clickhouse:
     image: clickhouse/clickhouse-server:${CLICKHOUSE_VERSION:-26.8.34.13-alpine}
@@ -213,10 +215,6 @@ services:
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:?}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run ./start.sh to create .env}
-    # Loopback only: maintenance from the host, nothing from outside.
-    ports:
-      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
-      - "127.0.0.1:${CLICKHOUSE_NATIVE_PORT:-9000}:9000"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse-config/system-logs.xml:/etc/clickhouse-server/config.d/system-logs.xml:ro
@@ -234,12 +232,15 @@ services:
       start_period: 10s
     networks:
       - internal
+    labels:
+      - "traefik.enable=false"
 
 networks:
   proxy:
     name: ${COMPOSE_PROJECT_NAME:-basicrum}_proxy
   internal:
     driver: bridge
+    internal: true
 
 volumes:
   postgres-data: {}

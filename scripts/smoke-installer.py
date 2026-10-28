@@ -3,6 +3,7 @@
 
 import argparse
 import hashlib
+import json
 import os
 from pathlib import Path
 import re
@@ -131,6 +132,22 @@ class SmokeTest:
             '{{if .State.Health}}{{.State.Health.Status}}{{end}}', *containers,
         ])
         check_health(health)
+        internal = self.run([
+            'docker', 'network', 'inspect', '--format', '{{.Internal}}',
+            f'{self.project}_internal',
+        ]).strip()
+        if internal != 'true':
+            raise RuntimeError('Database network is not internal.')
+        for service in ('clickhouse', 'basicrum_postgres'):
+            container = self.compose('ps', '-q', service).strip()
+            if not container:
+                raise RuntimeError(f'Missing database container: {service}')
+            bindings = self.run([
+                'docker', 'inspect', '--format', '{{json .HostConfig.PortBindings}}', container,
+            ])
+            if json.loads(bindings):
+                raise RuntimeError(f'Database has a published host port: {service}')
+        print('Database network is internal; neither database has a host port.', flush=True)
         status = self.run([
             'curl', '--noproxy', '*', '--connect-timeout', '2', '--max-time', '10',
             '-fsS', '-o', '/dev/null', '-w', '%{http_code}',
@@ -142,15 +159,14 @@ class SmokeTest:
         print('All six services are healthy; login endpoint returns HTTP 200.', flush=True)
 
     def exercise(self, no_pull=False):
-        http, clickhouse_http, clickhouse_native = available_ports(3)
+        http = available_ports(1)[0]
         print(f'Smoke-test project: {self.project}; HTTP port: {http}', flush=True)
         print('Installing into a temporary directory with real Docker...', flush=True)
         self.run([
             'bash', str(self.installer), '--install-dir', str(self.directory),
             '--domain', 'localhost', '--tls', 'none', '--http-port', str(http),
             '--set', 'HTTP_BIND=127.0.0.1', '--set', f'COMPOSE_PROJECT_NAME={self.project}',
-            '--set', f'CLICKHOUSE_HTTP_PORT={clickhouse_http}',
-            '--set', f'CLICKHOUSE_NATIVE_PORT={clickhouse_native}', '--yes',
+            '--yes',
             *(['--no-pull'] if no_pull else []),
         ], timeout=1200, show=True)
         self.assert_ready(http)

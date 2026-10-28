@@ -27,8 +27,8 @@ your browser ── dashboard ──▶ traefik :80 / :443 ───────
 | `/backend/v1/*`          |      100 | `basicrum_backend`        |
 | everything else          |        1 | `basicrum_frontend`       |
 
-Only Traefik is reachable from outside. ClickHouse is published on the host's
-loopback interface for maintenance; Postgres is not published at all.
+Only Traefik publishes host ports. ClickHouse and Postgres have no host port
+mappings and share an internal Docker network with the services that use them.
 
 ## Requirements
 
@@ -297,7 +297,6 @@ a TLS mode or port change recreates Traefik only.
 | `POSTGRES_PASSWORD` | generated | postgres, backend | URL-safe characters only: it is embedded in the backend's connection URL |
 | `CLICKHOUSE_USER` | `default` | clickhouse, backend, beacon | |
 | `CLICKHOUSE_PASSWORD` | generated | clickhouse, backend, beacon | |
-| `CLICKHOUSE_HTTP_PORT`, `CLICKHOUSE_NATIVE_PORT` | `8123`, `9000` | clickhouse | loopback-only host ports for maintenance |
 | `NEXTAUTH_SECRET` | generated | frontend | signs the dashboard's sessions |
 | `JWT_SECRET`, `COOKIE_SECRET`, `REFRESH_TOKEN_SECRET` | generated | backend | sign API tokens and cookies; at least 20 characters each |
 | `ORG_TOKEN_ENC_KEY_V1` | generated | backend | AES-256 key (base64) protecting the AI provider keys organisations may store |
@@ -380,9 +379,12 @@ own metrics on 9363 with one more file in `clickhouse-config/`, mounted into
 
 ## Security notes
 
-- Only Traefik's ports are published; ClickHouse listens on the host's
-  loopback interface and Postgres on the internal network only. Keep the
-  server's firewall at 80 and 443 (plus SSH).
+- Only Traefik's ports are published. ClickHouse and Postgres are on an
+  externally isolated Docker network with no host port mappings and are
+  explicitly disabled in Traefik. Keep the server's firewall at 80 and 443
+  (plus SSH). For database maintenance, use `docker compose exec` rather than
+  opening database ports on the host. Existing `.env` values for
+  `CLICKHOUSE_HTTP_PORT` and `CLICKHOUSE_NATIVE_PORT` are ignored.
 - `.env` is created with mode 600 and holds every secret. Keep it private.
 - Traefik reads the Docker socket (read-only mount) to discover the routed
   containers; that is the Docker provider's standard requirement and gives
@@ -397,9 +399,8 @@ own metrics on 9363 with one more file in `clickhouse-config/`, mounted into
   ps` shows which container is unhealthy, `docker compose logs --tail=100
   <service>` why. The backend logs its migrations; the beacon service needs
   ClickHouse; the frontend answers `/auth/login` once Next.js is up.
-- **"address already in use"**: something on the host holds 80, 443, 8123 or
-  9000. Change `HTTP_PORT`, `HTTPS_PORT`, `CLICKHOUSE_HTTP_PORT` or
-  `CLICKHOUSE_NATIVE_PORT` (`./start.sh --set CLICKHOUSE_HTTP_PORT=18123`).
+- **"address already in use"**: something on the host holds port 80 or 443.
+  Change `HTTP_PORT` or `HTTPS_PORT`, or stop the other service.
 - **Traefik answers 404**: the request's `Host` header is not `DOMAIN`. Check
   with `curl -sI -H "Host: rum.example.com" http://127.0.0.1/auth/login`.
 - **No certificate / browser warning in letsencrypt mode**: `docker compose

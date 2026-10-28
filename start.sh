@@ -75,7 +75,7 @@ Images and settings
   --version TAG          tag for basicrum/backend, basicrum/frontend and
                          basicrum/beacon_service (default sha-a8290f2520ed)
   --set KEY=VALUE        set any other .env key, repeatable
-                         (e.g. --set CLICKHOUSE_HTTP_PORT=18123 --set TELEMETRY_EXPOSE=true)
+                         (e.g. --set TELEMETRY_EXPOSE=true)
 
 Run control
   --no-start             write .env and the Traefik files and validate; do not pull or start
@@ -260,9 +260,6 @@ POSTGRES_DB=basicrum
 POSTGRES_PASSWORD=
 CLICKHOUSE_USER=default
 CLICKHOUSE_PASSWORD=
-# ClickHouse on the host's loopback interface, for maintenance.
-CLICKHOUSE_HTTP_PORT=8123
-CLICKHOUSE_NATIVE_PORT=9000
 
 # ---- Application secrets (generated once) ----------------------------------
 NEXTAUTH_SECRET=
@@ -415,8 +412,6 @@ env_default CLICKHOUSE_VERSION "$DEFAULT_CLICKHOUSE_VERSION"
 env_default POSTGRES_USER basicrum
 env_default POSTGRES_DB basicrum
 env_default CLICKHOUSE_USER default
-env_default CLICKHOUSE_HTTP_PORT 8123
-env_default CLICKHOUSE_NATIVE_PORT 9000
 
 # Secrets: generated on the first run that finds them missing, never rewritten.
 generated=""
@@ -594,7 +589,7 @@ if [ "$NO_START" = true ]; then
 fi
 
 step "Checking network prerequisites"
-published_ports=("${HTTP_BIND:-$(env_get HTTP_BIND)}:$(env_get HTTP_PORT)" "127.0.0.1:$(env_get CLICKHOUSE_HTTP_PORT)" "127.0.0.1:$(env_get CLICKHOUSE_NATIVE_PORT)")
+published_ports=("${HTTP_BIND:-$(env_get HTTP_BIND)}:$(env_get HTTP_PORT)")
 # An empty HTTP_BIND means every address.
 [ "${published_ports[0]#:}" = "${published_ports[0]}" ] || published_ports[0]="0.0.0.0${published_ports[0]}"
 if [ "$TLS_MODE" != none ]; then published_ports+=("0.0.0.0:$(env_get HTTPS_PORT)"); fi
