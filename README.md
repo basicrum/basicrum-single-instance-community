@@ -76,6 +76,11 @@ curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releas
 The [releases page](https://github.com/basicrum/basicrum-single-instance-community/releases)
 also provides `install.sh` and its `install.sh.sha256` checksum.
 
+Before changing an installation, the installer lists requirements that are
+ready, items that need action, and checks that must wait for Docker. It reports
+Docker Engine and the Docker Compose plugin together, even if Docker is not yet
+installed. Fix all items under **Needs action**, then run the same command again.
+
 The installer unpacks the required files into `~/basicrum`, then configures
 the stack. It asks for your hostname, TLS mode, and any needed certificate
 details through the terminal. The first TLS choice is Cloudflare with an Origin

@@ -60,6 +60,7 @@ class InstallerTests(unittest.TestCase):
 set -eu
 printf '%s\\n' "$*" >> "$TEST_DOCKER_LOG"
 case "$*" in
+  '--version') echo "Docker version ${TEST_CLIENT_VERSION:-29.0.0}, build test" ;;
   'context inspect'*) echo "${TEST_DOCKER_ENDPOINT:-unix:///var/run/docker.sock}" ;;
   'info --format '*)
     [ "${TEST_DOCKER_STATUS:-0}" = 0 ] || exit "$TEST_DOCKER_STATUS"
@@ -205,6 +206,32 @@ esac
         result = self.run_installer()
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b"Docker is not reachable", result.stderr)
+        self.assertFalse(self.dest.exists())
+
+    def test_missing_dependencies_are_reported_together_before_installation(self):
+        isolated = self.root / "limited-path"
+        isolated.mkdir()
+        required = "bash curl awk grep sed tr sort head tail mktemp chmod cp mv rm mkdir df dirname cat uname date sleep install ss getent".split()
+        hash_tool = "sha256sum" if shutil.which("sha256sum") else "shasum"
+        required.append(hash_tool)
+        for name in required:
+            source = self.bin / name if (self.bin / name).exists() else Path(shutil.which(name))
+            (isolated / name).symlink_to(source)
+        self.env["PATH"] = str(isolated)
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        for message in (b"Basicrum host requirements", b"Ready:", b"curl", b"Needs action:",
+                        b"openssl: install it", b"Docker Engine and CLI: install Docker",
+                        b"Docker Compose plugin: install", b"Check after the actions above:"):
+            self.assertIn(message, result.stderr)
+        self.assertFalse(self.dest.exists())
+
+    def test_compose_and_cpu_problems_are_reported_in_one_pass(self):
+        self.env.update(TEST_COMPOSE_STATUS="1", TEST_DOCKER_CPUS="1")
+        result = self.run_installer()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(b"Docker Compose plugin: install", result.stderr)
+        self.assertIn(b"allocate at least 2", result.stderr)
         self.assertFalse(self.dest.exists())
 
     def test_unsupported_versions_fail_before_installation(self):

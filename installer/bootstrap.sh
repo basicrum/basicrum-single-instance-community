@@ -92,17 +92,25 @@ HELP
     if { exec 3</dev/tty; } 2>/dev/null; then use_tty=true; fi
   fi
 
-  for command in docker openssl; do
-    command -v "$command" >/dev/null 2>&1 || die "$command is required; install it and run this installer again"
-  done
   work_dir="$(mktemp -d "${TMPDIR:-/tmp}/basicrum-install.XXXXXX")"
   trap 'rm -rf "$work_dir"' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
 
   verify_file() {
-    local name="$1" expected_sha="$2" actual_sha
-    actual_sha="$(openssl dgst -sha256 "$work_dir/bundle/$name" | awk '{print $NF}')"
+    local name="$1" expected_sha="$2" actual_sha output
+    if command -v openssl >/dev/null 2>&1; then
+      output="$(openssl dgst -sha256 "$work_dir/bundle/$name")"
+      actual_sha="${output##* }"
+    elif command -v sha256sum >/dev/null 2>&1; then
+      output="$(sha256sum "$work_dir/bundle/$name")"
+      actual_sha="${output%% *}"
+    elif command -v shasum >/dev/null 2>&1; then
+      output="$(shasum -a 256 "$work_dir/bundle/$name")"
+      actual_sha="${output%% *}"
+    else
+      die 'a SHA-256 checker is required to verify the installer (openssl, sha256sum, or shasum); other requirements cannot be checked until one is installed'
+    fi
     [ "$actual_sha" = "$expected_sha" ] || die "$name failed its checksum; download the installer again"
   }
   mkdir -p "$work_dir/bundle/clickhouse-config" "$work_dir/bundle/lib"

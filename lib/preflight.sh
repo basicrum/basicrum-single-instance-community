@@ -26,86 +26,177 @@ preflight_version_ge() {
   }'
 }
 
-preflight_require_version() {
-  preflight_version_ge "$2" "$3" || preflight_die "$1 '${2:-unknown}' is unsupported; stable version $3 or newer is required."
-}
-
-preflight_disk_kib() {
-  local available
-  available="$(LC_ALL=C df -Pk "$1" 2>/dev/null | awk 'NR == 2 { print $4 }')" \
-    || preflight_die "cannot inspect free disk space at $1"
-  case "$available" in ''|*[!0-9]*) preflight_die "cannot determine free disk space at $1" ;; esac
-  printf '%s' "$available"
-}
-
 preflight_check() {
-  local target="$1" tool endpoint versions engine api client info os arch cpus memory data_root operating_system available
-  for tool in docker openssl curl awk grep sed tr sort head tail mktemp chmod cp mv rm mkdir df dirname cat uname date sleep install; do
-    command -v "$tool" >/dev/null 2>&1 || preflight_die "$tool is required; install it and run setup again."
-  done
-  preflight_require_version Bash "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}.${BASH_VERSINFO[2]}" 3.2.0
+  local target="$1" quiet="${2:-}" tool missing='' os_name='' endpoint='' info='' versions=''
+  local engine='' api='' client='' compose='' os='' arch='' cpus='' memory='' data_root='' operating_system='' available=''
+  local need_count=0 item context_ok=false daemon_ok=false output_fd=1
+  local -a ready=() needs=() later=()
 
-  case "$(uname -s)" in
-    Linux)
-      for tool in ss getent; do
-        command -v "$tool" >/dev/null 2>&1 || preflight_die "$tool is required on Linux (install iproute2 and libc utilities)."
-      done ;;
-    Darwin)
-      for tool in lsof dscacheutil; do
-        command -v "$tool" >/dev/null 2>&1 || preflight_die "$tool is required on macOS."
-      done ;;
-    *) preflight_die 'use Linux, or macOS with Docker Desktop running Linux containers.' ;;
-  esac
-
-  # Bind mounts and localhost checks require a local daemon. DOCKER_CONTEXT
-  # takes precedence over DOCKER_HOST, matching Docker's own selection rules.
-  if [ -n "${DOCKER_CONTEXT:-}" ]; then
-    endpoint="$(docker context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null)" \
-      || preflight_die 'cannot inspect the selected Docker context.'
-  elif [ -n "${DOCKER_HOST:-}" ]; then
-    endpoint="$DOCKER_HOST"
+  # Collect independent results so customers can fix several requirements at
+  # once. Checks that depend on Docker are explicitly marked as deferred.
+  if preflight_version_ge "${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}.${BASH_VERSINFO[2]}" 3.2.0; then
+    ready+=("Bash ${BASH_VERSION} (3.2+ required)")
   else
-    endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null)" \
-      || preflight_die 'cannot inspect the selected Docker context.'
+    needs+=("Bash ${BASH_VERSION}: install Bash 3.2 or newer")
+    need_count=$((need_count + 1))
   fi
-  case "$endpoint" in unix:///*) ;; *) preflight_die 'a local Docker Unix socket is required; remote Docker contexts are unsupported by this single-server installer.' ;; esac
-
-  info="$(docker info --format '{{.OSType}}|{{.Architecture}}|{{.NCPU}}|{{.MemTotal}}|{{.DockerRootDir}}|{{.OperatingSystem}}' 2>/dev/null)" \
-    || preflight_die 'Docker is not reachable; start Docker and check your access to its socket.'
-  versions="$(docker version --format '{{.Server.Version}}|{{.Server.APIVersion}}|{{.Client.Version}}' 2>/dev/null)" \
-    || preflight_die 'cannot read Docker Engine and API versions.'
-  IFS='|' read -r engine api client <<< "$versions"
-  preflight_require_version 'Docker Engine' "$engine" "$PREFLIGHT_MIN_DOCKER"
-  preflight_require_version 'Docker CLI' "$client" "$PREFLIGHT_MIN_DOCKER"
-  preflight_require_version 'Docker server API' "$api" "$PREFLIGHT_MIN_API"
-  if [ -n "${DOCKER_API_VERSION:-}" ]; then
-    preflight_require_version DOCKER_API_VERSION "$DOCKER_API_VERSION" "$PREFLIGHT_MIN_API"
+  for tool in openssl curl; do
+    if command -v "$tool" >/dev/null 2>&1; then
+      ready+=("$tool")
+    else
+      needs+=("$tool: install it")
+      need_count=$((need_count + 1))
+    fi
+  done
+  for tool in awk grep sed tr sort head tail mktemp chmod cp mv rm mkdir df dirname cat uname date sleep install; do
+    command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
+  done
+  if [ -z "$missing" ]; then
+    ready+=("standard system utilities")
+  else
+    needs+=("standard system utilities: install$missing")
+    need_count=$((need_count + 1))
   fi
-  PREFLIGHT_COMPOSE_VERSION="$(docker compose version --short 2>/dev/null)" \
-    || preflight_die 'the Docker Compose plugin is required (docker compose).'
-  preflight_require_version 'Docker Compose' "$PREFLIGHT_COMPOSE_VERSION" "$PREFLIGHT_MIN_COMPOSE"
 
-  IFS='|' read -r os arch cpus memory data_root operating_system <<< "$info"
-  [ "$os" = linux ] || preflight_die 'Docker must be running Linux containers.'
-  case "$arch" in
-    x86_64|amd64) ;;
-    aarch64|arm64) preflight_note 'ARM64 daemon: startup will verify AMD64 emulation using the backend image.' ;;
-    *) preflight_die "unsupported Docker architecture '${arch:-unknown}'; use AMD64 or ARM64 with AMD64 emulation." ;;
+  if command -v uname >/dev/null 2>&1; then os_name="$(uname -s 2>/dev/null || true)"; fi
+  case "$os_name" in
+    Linux)
+      missing=''
+      for tool in ss getent; do command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"; done
+      if [ -z "$missing" ]; then ready+=("Linux network tools (ss, getent)")
+      else needs+=("Linux network tools:$missing (install iproute2 and libc utilities)"); need_count=$((need_count + 1)); fi ;;
+    Darwin)
+      missing=''
+      for tool in lsof dscacheutil; do command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"; done
+      if [ -z "$missing" ]; then ready+=("macOS network tools (lsof, dscacheutil)")
+      else needs+=("macOS network tools:$missing"); need_count=$((need_count + 1)); fi ;;
+    *) needs+=("Operating system: use Linux or macOS with Docker Desktop"); need_count=$((need_count + 1)) ;;
   esac
-  case "$cpus:$memory" in *[!0-9:]*|:*|*:) preflight_die 'cannot determine Docker CPU/RAM capacity.' ;; esac
-  [ "$cpus" -ge 2 ] || preflight_die "Docker has $cpus CPU(s); allocate at least 2."
-  # A nominal 4 GiB Linux host reports less after kernel reservations.
-  [ "$memory" -ge 3758096384 ] || preflight_die 'Docker needs at least 4 GiB of allocated RAM (3.5 GiB reported after system reservations).'
 
-  while [ ! -d "$target" ]; do target="$(dirname "$target")"; done
-  [ -w "$target" ] || preflight_die "installation directory is not writable: $target"
-  available="$(preflight_disk_kib "$target")" || exit 1
-  [ "$available" -ge 102400 ] || preflight_die 'at least 100 MiB of free space is required for installation files.'
-  if [ "$(uname -s)" = Linux ] && [ "$operating_system" != 'Docker Desktop' ] && [ -d "$data_root" ]; then
-    available="$(preflight_disk_kib "$data_root")" || exit 1
-    [ "$available" -ge "$PREFLIGHT_MIN_DISK_KIB" ] || preflight_die 'Docker data storage needs at least 20 GiB free.'
+  if command -v docker >/dev/null 2>&1; then
+    client="$(docker --version 2>/dev/null || true)"
+    client="${client#Docker version }"; client="${client%%,*}"
+    if preflight_version_ge "$client" "$PREFLIGHT_MIN_DOCKER"; then
+      ready+=("Docker CLI $client")
+    else
+      needs+=("Docker CLI '${client:-unknown}': install stable version $PREFLIGHT_MIN_DOCKER or newer")
+      need_count=$((need_count + 1))
+    fi
+    if ! compose="$(docker compose version --short 2>/dev/null)" || [ -z "$compose" ]; then
+      needs+=("Docker Compose plugin: install version $PREFLIGHT_MIN_COMPOSE or newer (docker compose)")
+      need_count=$((need_count + 1))
+    elif preflight_version_ge "$compose" "$PREFLIGHT_MIN_COMPOSE"; then
+      ready+=("Docker Compose plugin $compose")
+    else
+      needs+=("Docker Compose plugin '$compose': install stable version $PREFLIGHT_MIN_COMPOSE or newer")
+      need_count=$((need_count + 1))
+    fi
+
+    # DOCKER_CONTEXT takes precedence over DOCKER_HOST, as in Docker itself.
+    if [ -n "${DOCKER_CONTEXT:-}" ]; then
+      endpoint="$(docker context inspect "$DOCKER_CONTEXT" --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
+    elif [ -n "${DOCKER_HOST:-}" ]; then
+      endpoint="$DOCKER_HOST"
+    else
+      endpoint="$(docker context inspect --format '{{.Endpoints.docker.Host}}' 2>/dev/null || true)"
+    fi
+    case "$endpoint" in
+      unix:///*) context_ok=true; ready+=("local Docker context") ;;
+      '') needs+=("Docker context: select a local Docker Unix socket"); need_count=$((need_count + 1)) ;;
+      *) needs+=("Docker context '$endpoint': use a local Docker Unix socket, not a remote Docker host"); need_count=$((need_count + 1)) ;;
+    esac
+    if [ "$context_ok" = true ]; then
+      info="$(docker info --format '{{.OSType}}|{{.Architecture}}|{{.NCPU}}|{{.MemTotal}}|{{.DockerRootDir}}|{{.OperatingSystem}}' 2>/dev/null || true)"
+      if [ -n "$info" ]; then
+        daemon_ok=true
+        ready+=("Docker Engine is reachable")
+      else
+        needs+=("Docker is not reachable: start Docker and check access to its socket")
+        need_count=$((need_count + 1))
+      fi
+    fi
+  else
+    needs+=("Docker Engine and CLI: install Docker $PREFLIGHT_MIN_DOCKER or newer")
+    needs+=("Docker Compose plugin: install version $PREFLIGHT_MIN_COMPOSE or newer (docker compose)")
+    need_count=$((need_count + 2))
+    later+=("Docker Engine version, context, CPU/RAM and data storage: check after Docker is installed")
   fi
-  preflight_note "Docker $engine (API $api), Compose $PREFLIGHT_COMPOSE_VERSION, CPU/RAM and installation storage checks passed."
+
+  if [ "$daemon_ok" = true ]; then
+    versions="$(docker version --format '{{.Server.Version}}|{{.Server.APIVersion}}|{{.Client.Version}}' 2>/dev/null || true)"
+    IFS='|' read -r engine api client <<< "$versions"
+    if preflight_version_ge "$engine" "$PREFLIGHT_MIN_DOCKER"; then ready+=("Docker Engine $engine")
+    else needs+=("Docker Engine '${engine:-unknown}': install stable version $PREFLIGHT_MIN_DOCKER or newer"); need_count=$((need_count + 1)); fi
+    if preflight_version_ge "$api" "$PREFLIGHT_MIN_API"; then ready+=("Docker server API $api")
+    else needs+=("Docker server API '${api:-unknown}': version $PREFLIGHT_MIN_API or newer required"); need_count=$((need_count + 1)); fi
+    IFS='|' read -r os arch cpus memory data_root operating_system <<< "$info"
+    if [ "$os" = linux ]; then ready+=("Docker runs Linux containers")
+    else needs+=("Docker must run Linux containers"); need_count=$((need_count + 1)); fi
+    case "$arch" in
+      x86_64|amd64) ready+=("Docker architecture $arch") ;;
+      aarch64|arm64) ready+=("Docker architecture $arch (AMD64 emulation checked at startup)") ;;
+      *) needs+=("Docker architecture '${arch:-unknown}': use AMD64 or ARM64 with AMD64 emulation"); need_count=$((need_count + 1)) ;;
+    esac
+    case "$cpus" in
+      ''|*[!0-9]*) needs+=("Docker CPU capacity: cannot determine; allocate at least 2 CPUs"); need_count=$((need_count + 1)) ;;
+      *) if [ "$cpus" -ge 2 ]; then ready+=("Docker CPUs: $cpus (2+ required)")
+         else needs+=("Docker has $cpus CPU(s); allocate at least 2"); need_count=$((need_count + 1)); fi ;;
+    esac
+    case "$memory" in
+      ''|*[!0-9]*) needs+=("Docker RAM capacity: cannot determine; allocate at least 4 GiB"); need_count=$((need_count + 1)) ;;
+      *) if [ "$memory" -ge 3758096384 ]; then ready+=("Docker RAM: at least 4 GiB allocated")
+         else needs+=("Docker needs at least 4 GiB of allocated RAM (3.5 GiB reported after system reservations)"); need_count=$((need_count + 1)); fi ;;
+    esac
+    if [ "$os_name" = Linux ] && [ "$operating_system" != 'Docker Desktop' ] && [ -d "$data_root" ]; then
+      available="$(LC_ALL=C df -Pk "$data_root" 2>/dev/null | awk 'NR == 2 { print $4 }' || true)"
+      case "$available" in
+        ''|*[!0-9]*) needs+=("Docker data storage: cannot determine free space"); need_count=$((need_count + 1)) ;;
+        *) if [ "$available" -ge "$PREFLIGHT_MIN_DISK_KIB" ]; then ready+=("Docker data storage: 20 GiB free")
+           else needs+=("Docker data storage needs at least 20 GiB free"); need_count=$((need_count + 1)); fi ;;
+      esac
+    fi
+  elif command -v docker >/dev/null 2>&1; then
+    later+=("Docker Engine version, CPU/RAM and data storage: check when Docker is reachable")
+  fi
+
+  if [ -n "${DOCKER_API_VERSION:-}" ]; then
+    if preflight_version_ge "$DOCKER_API_VERSION" "$PREFLIGHT_MIN_API"; then ready+=("DOCKER_API_VERSION $DOCKER_API_VERSION")
+    else needs+=("DOCKER_API_VERSION '$DOCKER_API_VERSION': unset it or use $PREFLIGHT_MIN_API or newer"); need_count=$((need_count + 1)); fi
+  fi
+  while [ ! -d "$target" ] && [ "$target" != / ]; do target="$(dirname "$target")"; done
+  if [ -w "$target" ]; then ready+=("installation directory is writable")
+  else needs+=("installation directory is not writable: $target"); need_count=$((need_count + 1)); fi
+  if command -v df >/dev/null 2>&1 && command -v awk >/dev/null 2>&1; then
+    available="$(LC_ALL=C df -Pk "$target" 2>/dev/null | awk 'NR == 2 { print $4 }' || true)"
+    case "$available" in
+      ''|*[!0-9]*) needs+=("installation storage: cannot determine free space at $target"); need_count=$((need_count + 1)) ;;
+      *) if [ "$available" -ge 102400 ]; then ready+=("installation storage: 100 MiB free")
+         else needs+=("at least 100 MiB of free space is required for installation files"); need_count=$((need_count + 1)); fi ;;
+    esac
+  else
+    later+=("installation storage: check when df and awk are available")
+  fi
+
+  if [ "$quiet" != quiet ] || [ "$need_count" -gt 0 ]; then
+    [ "$need_count" -eq 0 ] || output_fd=2
+    {
+      printf '\nBasicrum host requirements\n'
+      printf 'Ready:\n'
+      for item in ${ready[@]+"${ready[@]}"}; do printf '  ✓ %s\n' "$item"; done
+      if [ "$need_count" -gt 0 ]; then
+        printf 'Needs action:\n'
+        for item in ${needs[@]+"${needs[@]}"}; do printf '  ✗ %s\n' "$item"; done
+      fi
+      if [ "${#later[@]}" -gt 0 ]; then
+        printf 'Check after the actions above:\n'
+        for item in ${later[@]+"${later[@]}"}; do printf '  ? %s\n' "$item"; done
+      fi
+    } >&"$output_fd"
+  fi
+  if [ "$need_count" -gt 0 ]; then
+    printf 'Preflight failed: fix the items under Needs action, then run the same installer command again.\n' >&2
+    return 1
+  fi
 }
 
 preflight_bindings_overlap() {

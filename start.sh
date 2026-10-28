@@ -212,7 +212,7 @@ normalize_tls() {
 step "Basicrum single-server install"
 
 . "$SCRIPT_DIR/lib/preflight.sh"
-preflight_check "$SCRIPT_DIR"
+preflight_check "$SCRIPT_DIR" quiet
 
 # ---------------------------------------------------------------------------
 # .env: create the template on the first run
