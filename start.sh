@@ -14,7 +14,7 @@
 #   ./start.sh --domain rum.example.com --tls letsencrypt --email you@example.com
 #   ./start.sh --domain rum.example.com --tls custom --cert fullchain.pem --key privkey.pem
 #   ./start.sh --domain rum.example.com --tls none --public-url https://rum.example.com
-#   ./start.sh --version sha-xxxxxxxxxxxx        move the three Basicrum images to another tag
+#   ./start.sh --version 0.0.1               use the three community images
 #   ./start.sh --help
 #
 # Requirements are enforced by lib/preflight.sh before configuration changes.
@@ -30,7 +30,7 @@ TRAEFIK_STATIC="traefik/traefik.yml"
 TRAEFIK_TLS_DYNAMIC="traefik/dynamic/tls.yml"
 SSL_DIR="traefik/ssl"
 
-DEFAULT_BASICRUM_VERSION="sha-a8290f2520ed"
+DEFAULT_BASICRUM_VERSION="0.0.1"
 DEFAULT_TRAEFIK_VERSION="v3.7.16"
 DEFAULT_POSTGRES_VERSION="17.5"
 DEFAULT_CLICKHOUSE_VERSION="26.8.34.13-alpine"
@@ -72,8 +72,7 @@ Site
   --https-port N         host port for HTTPS (default 443; letsencrypt and custom modes)
 
 Images and settings
-  --version TAG          tag for basicrum/backend, basicrum/frontend and
-                         basicrum/beacon_service (default sha-a8290f2520ed)
+  --version TAG          shared tag for the three Basicrum images (default 0.0.1)
   --set KEY=VALUE        set any other .env key, repeatable
                          (e.g. --set TELEMETRY_EXPOSE=true)
 
@@ -247,8 +246,9 @@ TRAEFIK_ENTRYPOINT=
 COMPOSE_FILE=
 
 # ---- Versions --------------------------------------------------------------
-# Tag shared by basicrum/backend, basicrum/frontend and basicrum/beacon_service.
+# Shared tag and repository suffix for the three Basicrum application images.
 BASICRUM_VERSION=
+BASICRUM_IMAGE_SUFFIX=_community
 TRAEFIK_VERSION=
 POSTGRES_VERSION=
 CLICKHOUSE_VERSION=
@@ -403,7 +403,23 @@ fi
 env_has HTTP_BIND || env_set HTTP_BIND ""
 env_has TRAEFIK_TRUSTED_PROXY_IPS || env_set TRAEFIK_TRUSTED_PROXY_IPS ""
 
-[ -n "$ARG_VERSION" ] && env_set BASICRUM_VERSION "$ARG_VERSION"
+# Installations created before the community image repositories existed keep
+# their original image names and tag. A semantic --version switches all three
+# images to the community repositories; a sha-* tag switches back to legacy.
+if ! env_has BASICRUM_IMAGE_SUFFIX; then
+  if [ "$FIRST_RUN" = true ]; then env_set BASICRUM_IMAGE_SUFFIX _community
+  else env_set BASICRUM_IMAGE_SUFFIX ""; fi
+fi
+if [ -n "$ARG_VERSION" ]; then
+  env_set BASICRUM_VERSION "$ARG_VERSION"
+  case "$ARG_VERSION" in
+    sha-*) env_set BASICRUM_IMAGE_SUFFIX "" ;;
+    *)
+      if printf '%s' "$ARG_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+        env_set BASICRUM_IMAGE_SUFFIX _community
+      fi ;;
+  esac
+fi
 env_default BASICRUM_VERSION "$DEFAULT_BASICRUM_VERSION"
 env_default TRAEFIK_VERSION "$DEFAULT_TRAEFIK_VERSION"
 env_default POSTGRES_VERSION "$DEFAULT_POSTGRES_VERSION"
@@ -443,6 +459,10 @@ if [ -n "$ARG_SETS" ]; then
     env_set "$key" "$value"
   done <<< "$ARG_SETS"
 fi
+case "$(env_get BASICRUM_IMAGE_SUFFIX)" in
+  ''|_community) ;;
+  *) die 'BASICRUM_IMAGE_SUFFIX must be empty (legacy) or _community' ;;
+esac
 
 # Derived values.
 PUBLIC_URL="$(env_get PUBLIC_URL)"
@@ -602,7 +622,7 @@ if [ "$NO_PULL" = false ]; then
 fi
 
 step "Checking image execution and Docker storage"
-preflight_images "basicrum/backend:$(env_get BASICRUM_VERSION)" "clickhouse/clickhouse-server:$(env_get CLICKHOUSE_VERSION)"
+preflight_images "basicrum/backend$(env_get BASICRUM_IMAGE_SUFFIX):$(env_get BASICRUM_VERSION)" "clickhouse/clickhouse-server:$(env_get CLICKHOUSE_VERSION)"
 
 step "Starting the stack (waiting for health checks, up to ${WAIT_TIMEOUT_SECONDS}s)"
 traefik_existed=""
@@ -656,7 +676,7 @@ cat <<SUMMARY
 
   Dashboard:        $PUBLIC_URL
   Beacon endpoint:  $PUBLIC_URL/beacon/catcher
-  Images:           basicrum/{backend,frontend,beacon_service}:$(env_get BASICRUM_VERSION)
+  Images:           basicrum/{backend,frontend,beacon_service}$(env_get BASICRUM_IMAGE_SUFFIX):$(env_get BASICRUM_VERSION)
 SUMMARY
 case "$TLS_MODE" in
   letsencrypt)

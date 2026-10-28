@@ -62,7 +62,7 @@ services:
         condition: service_healthy
 
   basicrum_backend:
-    image: basicrum/backend:${BASICRUM_VERSION:?run ./start.sh to create .env}
+    image: basicrum/backend${BASICRUM_IMAGE_SUFFIX-_community}:${BASICRUM_VERSION:?run ./start.sh to create .env}
     platform: linux/amd64
     restart: always
     logging: *default-logging
@@ -107,7 +107,7 @@ services:
       - "traefik.docker.network=${COMPOSE_PROJECT_NAME:-basicrum}_proxy"
 
   basicrum_beacon_service:
-    image: basicrum/beacon_service:${BASICRUM_VERSION:?run ./start.sh to create .env}
+    image: basicrum/beacon_service${BASICRUM_IMAGE_SUFFIX-_community}:${BASICRUM_VERSION:?run ./start.sh to create .env}
     platform: linux/amd64
     restart: always
     logging: *default-logging
@@ -148,7 +148,7 @@ services:
       - "traefik.docker.network=${COMPOSE_PROJECT_NAME:-basicrum}_proxy"
 
   basicrum_frontend:
-    image: basicrum/frontend:${BASICRUM_VERSION:?run ./start.sh to create .env}
+    image: basicrum/frontend${BASICRUM_IMAGE_SUFFIX-_community}:${BASICRUM_VERSION:?run ./start.sh to create .env}
     platform: linux/amd64
     restart: always
     logging: *default-logging

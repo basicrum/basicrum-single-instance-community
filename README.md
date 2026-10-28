@@ -289,7 +289,8 @@ a TLS mode or port change recreates Traefik only.
 | `HTTP_BIND` | empty, `127.0.0.1` in `none` mode | traefik | address the HTTP port binds to; empty means every address |
 | `TRAEFIK_TRUSTED_PROXY_IPS` | empty | traefik | comma-separated addresses or CIDRs whose `X-Forwarded-*` headers are trusted |
 | `TRAEFIK_ENTRYPOINT`, `COMPOSE_FILE` | derived | compose | `web`/`websecure`; whether `compose.https.yml` is included. Do not edit |
-| `BASICRUM_VERSION` | `sha-a8290f2520ed` | the three app images | one tag for `basicrum/backend`, `basicrum/frontend`, `basicrum/beacon_service` |
+| `BASICRUM_VERSION` | `0.0.1` | the three app images | shared tag for the backend, frontend and beacon service |
+| `BASICRUM_IMAGE_SUFFIX` | `_community` on new installs | the three app images | repository suffix; empty keeps the legacy image repositories on existing installs |
 | `TRAEFIK_VERSION` | `v3.7.16` | traefik | pinned patch of the 3.7 series; supports Docker API version negotiation |
 | `POSTGRES_VERSION` | `17.5` | postgres | see Upgrading before changing the major version |
 | `CLICKHOUSE_VERSION` | `26.8.34.13-alpine` | clickhouse | pinned patch of the 26.8 LTS series |
@@ -326,23 +327,27 @@ docker compose down                        # stop everything; data stays in the 
 
 ### Upgrading
 
-The application images are tagged `sha-<12 hex>` after the commit of the
-Basicrum monorepo they were built from, and such a tag never changes once
-pushed (see the tag lists on Docker Hub, for instance
-[basicrum/backend](https://hub.docker.com/r/basicrum/backend/tags)). The three
-images share the API contract, so always move them together, which is what
-`BASICRUM_VERSION` does:
+New installations use `basicrum/backend_community`,
+`basicrum/frontend_community` and `basicrum/beacon_service_community`, all at
+tag `0.0.1`. The three images share the API contract, so move them together
+with `BASICRUM_VERSION` when a newer matching tag is published:
 
 ```bash
-./start.sh --version sha-0123456789ab      # pulls, recreates the three application containers
+./start.sh --version 0.0.2                  # example: only after all three images have this tag
 docker compose logs basicrum_backend | grep -i migrat
 ```
+
+Existing installations with a `sha-*` tag keep the original `basicrum/backend`,
+`basicrum/frontend` and `basicrum/beacon_service` repositories when the
+installer is re-run. To switch an existing installation to the community
+images, run `./start.sh --version 0.0.1`; this changes the three repositories
+and their shared tag together. The stored `BASICRUM_IMAGE_SUFFIX` is empty for
+legacy images and `_community` for the new repositories.
 
 The backend applies its Postgres and ClickHouse migrations when it starts, so a
 newer version migrates the data forward on its own. Going back to an older tag
 works only while no migration has run in between; changing an image tag does
-not undo database migrations. `latest` exists on Docker Hub but is promoted rarely
-and lags behind the `sha-` tags; prefer an explicit tag.
+not undo database migrations. Prefer an explicit matching tag over `latest`.
 
 New installations default to Traefik `v3.7.16` and ClickHouse
 `26.8.34.13-alpine` (26.8 LTS). Existing installations retain the
@@ -357,10 +362,10 @@ separate database migration procedure.
 
 ### Forgotten admin password
 
-Newer backend images ship `build/scripts/resetUserPassword.js`
-(`docker compose exec basicrum_backend node build/scripts/resetUserPassword.js
-you@example.com 'new password'`); the default tag of this edition does not have
-it yet. Until then another admin can invite a fresh account.
+If your backend image ships `build/scripts/resetUserPassword.js`, run
+`docker compose exec basicrum_backend node build/scripts/resetUserPassword.js
+you@example.com 'new password'`. Otherwise another admin can invite a fresh
+account.
 
 ### Telemetry
 
