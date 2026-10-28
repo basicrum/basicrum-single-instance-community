@@ -56,18 +56,20 @@ mappings and share an internal Docker network with the services that use them.
 
 ### Self-contained installer
 
-There is no published `install.sh` release asset yet, so a public download
-command is not available. To use the self-contained installer now, build it
-from this checkout and run the generated file:
+Install the latest stable release:
+
+```bash
+curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash
+```
+
+The [releases page](https://github.com/basicrum/basicrum-single-instance-community/releases)
+also provides `install.sh` and its `install.sh.sha256` checksum. To build the
+same self-contained installer from this checkout instead:
 
 ```bash
 python3 scripts/build-installer.py
 bash dist/install.sh
 ```
-
-The [releases page](https://github.com/basicrum/basicrum-single-instance-community/releases)
-will provide the download after the first release is published. The release
-process is described below.
 
 The installer unpacks the required files into `~/basicrum`, then runs the
 existing setup. It asks for your hostname, TLS mode, and any needed certificate
@@ -80,7 +82,7 @@ installer replaces any installed files.
 For an unattended installation, pass the settings as arguments:
 
 ```bash
-bash dist/install.sh \
+curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash -s -- \
   --install-dir "$HOME/basicrum" \
   --domain rum.example.com --tls letsencrypt --email you@example.com --yes
 ```
@@ -508,7 +510,7 @@ Validation needs Python 3, Bash, Docker with Compose, curl and OpenSSL. It does
 not start the application containers.
 
 `.github/workflows/release.yml` is a manually triggered **Prepare installer
-release** workflow. Once these files are committed to a GitHub repository:
+release** workflow:
 
 1. Push a stable version tag such as `v1.0.0` pointing to a commit in the
    default branch's history. That commit must include these CI scripts.
@@ -547,6 +549,6 @@ redact the generated secrets. `--no-pull` uses cached images for local runs;
 the release workflow always pulls. This check exercises HTTP mode; it does
 not test public DNS, Let's Encrypt issuance or browser interactions.
 
-After publishing a stable release, add its live installer download command to
-the installation section above. The current release assets, when available,
-are listed on the [releases page](https://github.com/basicrum/basicrum-single-instance-community/releases).
+The download command in the installation section above resolves to the latest
+published stable release. Current assets are listed on the
+[releases page](https://github.com/basicrum/basicrum-single-instance-community/releases).
