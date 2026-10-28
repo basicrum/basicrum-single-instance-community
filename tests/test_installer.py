@@ -130,7 +130,11 @@ esac
         self.assertEqual(checksum, hashlib.sha256(self.script).hexdigest())
 
     def test_unattended_install_and_rerun_preserve_state(self):
-        self.assert_ok(self.run_installer())
+        first = self.run_installer()
+        self.assert_ok(first)
+        command = b"curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash"
+        self.assertIn(command, first.stdout)
+        self.assertNotIn(b"start.sh", first.stdout)
         before = (self.dest / ".env").read_bytes()
         self.assertIn(f"BASICRUM_VERSION={self.image_version}\n".encode(), before)
         self.assertEqual((self.dest / ".env").stat().st_mode & 0o777, 0o600)
@@ -138,7 +142,9 @@ esac
             path = self.dest / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("keep this test data")
-        self.assert_ok(self.run_installer(["--yes", "--no-start"]))
+        rerun = self.run_installer(["--yes", "--no-start"])
+        self.assert_ok(rerun)
+        self.assertIn(command, rerun.stdout)
         self.assertEqual(before, (self.dest / ".env").read_bytes())
         for name in ("user-data/sentinel", "traefik/ssl/cert.pem", "traefik/ssl/key.pem"):
             self.assertEqual((self.dest / name).read_text(), "keep this test data")
@@ -176,7 +182,9 @@ esac
 
     def test_install_dir_with_spaces_and_unknown_option(self):
         dest = self.root / "path with spaces"
-        self.assert_ok(self.run_installer(["--install-dir", str(dest), *self.flags]))
+        result = self.run_installer(["--install-dir", str(dest), *self.flags])
+        self.assert_ok(result)
+        self.assertIn(b" | bash -s -- --install-dir ", result.stdout)
         self.assertTrue((dest / ".env").exists())
         result = self.run_installer(["--not-an-option"])
         self.assertNotEqual(result.returncode, 0)
@@ -364,7 +372,7 @@ esac
         self.env["TEST_UP_STATUS"] = "1"
         result = self.run_installer([flag for flag in self.flags if flag != "--no-start"])
         self.assertNotEqual(result.returncode, 0)
-        self.assertNotIn(b"Basicrum is running", result.stdout)
+        self.assertNotIn(b"Basicrum is ready", result.stdout)
 
     def test_endpoint_failure_is_fatal_and_requests_have_timeouts(self):
         self.env["TEST_CURL_STATUS"] = "503"
@@ -394,7 +402,7 @@ esac
         result = self.run_installer(flags)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(b"Traefik did not become healthy", result.stderr)
-        self.assertNotIn(b"Basicrum is running", result.stdout)
+        self.assertNotIn(b"Basicrum is ready", result.stdout)
         self.assertIn("--force-recreate --no-deps --wait --wait-timeout 600 traefik", (self.root / "docker.log").read_text())
 
     def test_corrupted_payload_does_not_create_install(self):
@@ -540,7 +548,8 @@ esac
             self.assertIsNotNone(status, transcript.decode(errors="replace"))
             self.assertEqual(os.waitstatus_to_exitcode(status), 0, transcript.decode(errors="replace"))
             self.assertFalse(responses, transcript.decode(errors="replace"))
-            self.assertIn(b"Basicrum is running", transcript)
+            self.assertIn(b"Basicrum is ready", transcript)
+            self.assertIn(b"curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash", transcript)
             self.assertIn("DOMAIN=localhost", (self.dest / ".env").read_text())
         finally:
             if status is None:

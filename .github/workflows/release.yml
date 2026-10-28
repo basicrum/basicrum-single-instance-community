@@ -115,8 +115,20 @@ jobs:
           [[ "$kind" == commit && "$commit" == "$RELEASE_COMMIT" ]] || {
             echo 'The release tag changed after testing; rerun the workflow.' >&2; exit 1;
           }
-          printf 'Installer built from commit `%s`.\n\nValidated with the installer test suite and a fresh Docker installation followed by a rerun. All six services passed their healthchecks and the login endpoint returned HTTP 200.\n\nDownload `install.sh` and `install.sh.sha256`, then verify with `sha256sum --check install.sh.sha256`.\n' \
-            "$RELEASE_COMMIT" > "$RUNNER_TEMP/release-notes.md"
+          {
+            printf 'Installer built from commit `%s`.\n' "$RELEASE_COMMIT"
+            printf '%s\n' \
+              '' \
+              'Install or update with the same command:' \
+              '' \
+              '```bash' \
+              'curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash' \
+              '```' \
+              '' \
+              'Validated with the installer test suite and a fresh Docker installation followed by a rerun. All six services passed their healthchecks and the login endpoint returned HTTP 200.' \
+              '' \
+              'Download `install.sh` and `install.sh.sha256`, then verify with `sha256sum --check install.sh.sha256`.'
+          } > "$RUNNER_TEMP/release-notes.md"
           gh release create "$RELEASE_TAG" dist/install.sh dist/install.sh.sha256 \
-            --verify-tag --draft --title "Basicrum community $RELEASE_TAG" \
+            --verify-tag --draft --title "Basicrum community installer $RELEASE_TAG" \
             --notes-file "$RUNNER_TEMP/release-notes.md"

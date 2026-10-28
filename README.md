@@ -1,5 +1,15 @@
 # Basicrum, single-server community edition
 
+## Install or update
+
+Run this command on the server. Docker must already be installed and running.
+The installer will guide you through the hostname and HTTPS setup on the first
+run. Run the same command again to update Basicrum.
+
+```bash
+curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash
+```
+
 [Basicrum](https://basicrum.com) is an open-source Real User Monitoring system:
 a [Boomerang](https://github.com/basicrum/boomerang)-based script in your
 visitors' browsers sends performance beacons, a Rust service stores them in

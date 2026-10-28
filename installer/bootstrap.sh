@@ -12,7 +12,8 @@ basicrum_install() (
     cat <<'HELP'
 Basicrum community installer
 
-Usage: bash install.sh [--install-dir DIR] [options]
+Usage: curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash
+       curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash -s -- [options]
 
 Installs into ~/basicrum by default, then asks for a hostname and TLS mode.
 Requires Docker Engine 20.10.10+ (API 1.40+), Compose 2.24+, Bash 3.2+,
@@ -136,8 +137,7 @@ HELP
   chmod 755 "$install_dir/start.sh"
   printf '%s\n' 'basicrum-community-v1' > "$install_dir/$marker"
 
-  printf '\nBasicrum files installed in %s\n' "$install_dir"
-  printf 'Rerun the latest installer to apply future updates.\n\n'
+  printf '\nPreparing Basicrum in %s\n\n' "$install_dir"
   # Keep the caller's directory for relative certificate paths entered at
   # prompts; start.sh records it before changing to its own directory. The
   # guarded array expansion also works with empty arrays on Bash 3.2.
@@ -146,6 +146,12 @@ HELP
   else
     bash "$install_dir/start.sh" ${start_args[@]+"${start_args[@]}"} </dev/null
   fi
+  printf '\nTo start or update this installation later, run:\n  '
+  printf 'curl -fsSL https://github.com/basicrum/basicrum-single-instance-community/releases/latest/download/install.sh | bash'
+  if [ "$install_dir" != "${HOME:?HOME must be set}/basicrum" ]; then
+    printf ' -s -- --install-dir %q' "$install_dir"
+  fi
+  printf '\n'
 )
 
 basicrum_install "$@"

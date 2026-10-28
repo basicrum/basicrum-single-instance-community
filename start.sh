@@ -589,8 +589,7 @@ ok "docker compose config is valid"
 
 if [ "$NO_START" = true ]; then
   info ""
-  info "Configuration written, nothing started (--no-start). Rerun the installer"
-  info "without --no-start (and with the same --install-dir, if used) to start services."
+  info "Configuration validated. Nothing started (--no-start)."
   info "Image execution, Docker data disk, port/DNS and endpoint checks run then."
   exit 0
 fi
@@ -658,7 +657,7 @@ wait_for_edge
 # ---------------------------------------------------------------------------
 # What now
 # ---------------------------------------------------------------------------
-step "Basicrum is running"
+step "Basicrum is ready"
 cat <<SUMMARY
 
   Dashboard:        $PUBLIC_URL
@@ -675,24 +674,18 @@ case "$TLS_MODE" in
     info "  HTTP:             $(env_get HTTP_BIND | sed 's/^$/every address/'):$HTTP_PORT, plain. Point your reverse proxy at it,"
     info "                    forward the Host header unchanged, and make $PUBLIC_URL reach it." ;;
 esac
-cat <<FIRSTRUN
+if [ "$FIRST_RUN" = true ]; then
+  cat <<FIRSTRUN
 
-First run
+Next steps
   1. Create the first account, which becomes the organisation's admin:
        $PUBLIC_URL/auth/register?firstUser=true
      Passwords need at least 15 characters. Every later account needs an invite
      code, created under Settings > Users.
   2. Add your site under Settings > Sites, install the Boomerang snippet it
      shows (the beacon endpoint above is already filled in), then press Verify.
-  3. Optional, to see the dashboards before your own site sends beacons: seed
-     the verified test site the beacon simulator targets, then run the
-     simulator from the Basicrum repository against the beacon endpoint:
-       docker compose exec basicrum_backend node build/scripts/seedVerifiedSite.js
-
-Day to day
-  docker compose ps                         state of the six containers
-  docker compose logs -f basicrum_backend   follow one service's log
-  Rerun the latest installer command to apply image and configuration updates.
-  docker compose down                       stop (data stays in the named volumes)
 
 FIRSTRUN
+else
+  info "  If you still need the first admin account: $PUBLIC_URL/auth/register?firstUser=true"
+fi
