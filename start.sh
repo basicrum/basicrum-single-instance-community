@@ -222,7 +222,7 @@ if [ ! -f "$ENV_FILE" ]; then
   FIRST_RUN=true
   umask 077
   cat > "$ENV_FILE" <<ENVTEMPLATE
-# Basicrum community install. Created by ./start.sh on $(date -u +%Y-%m-%dT%H:%MZ).
+# Basicrum community install. Created by the Basicrum installer on $(date -u +%Y-%m-%dT%H:%MZ).
 # Keep this file private: it holds every secret of the installation.
 # Re-running the installer keeps settings and secrets, except that its bundled
 # application image version updates BASICRUM_VERSION. It re-derives PUBLIC_URL,
@@ -245,7 +245,7 @@ HTTPS_PORT=443
 HTTP_BIND=
 # Proxies whose X-Forwarded-* headers Traefik trusts: comma-separated IPs or CIDRs (optional).
 TRAEFIK_TRUSTED_PROXY_IPS=
-# Derived by start.sh from TLS_MODE; do not edit.
+# Derived by the installer from TLS_MODE; do not edit.
 TRAEFIK_ENTRYPOINT=
 COMPOSE_FILE=
 
@@ -494,8 +494,8 @@ fi
 
 {
   cat <<TRAEFIK_HEAD
-# Traefik static configuration, written by ./start.sh for TLS mode "$TLS_MODE".
-# Change .env and re-run ./start.sh instead of editing this file.
+# Traefik static configuration, written by the Basicrum installer for TLS mode "$TLS_MODE".
+# Change .env and rerun the Basicrum installer instead of editing this file.
 global:
   checkNewVersion: false
   sendAnonymousUsage: false
@@ -560,9 +560,9 @@ TRAEFIK_CUSTOM
 
 if [ "$TLS_MODE" = custom ]; then
   cat > "$TRAEFIK_TLS_DYNAMIC" <<'TLS_DYNAMIC'
-# Written by ./start.sh: the certificate pair in traefik/ssl/, served for every
+# Written by the Basicrum installer: the certificate pair in traefik/ssl/, served for every
 # hostname. Replace the two files to rotate; Traefik picks the change up when
-# this file is written again (re-run ./start.sh, or touch it).
+# this file is written again (rerun the Basicrum installer, or touch it).
 tls:
   certificates:
     - certFile: /etc/certs/cert.pem

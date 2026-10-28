@@ -2,7 +2,7 @@
 #
 # This is the stack the Monarch control plane renders for the public demo
 # (demo.playground.basicrum.com), with every secret and host-specific value
-# moved into .env. Run ./start.sh once: it writes .env with generated secrets,
+# moved into .env. Run the Basicrum installer once: it writes .env with generated secrets,
 # writes the Traefik configuration for the TLS mode you choose, and starts the
 # stack. Later runs keep .env and converge the containers.
 #
@@ -21,7 +21,7 @@
 # Networks: `proxy` carries Traefik and everything it routes to; `internal`
 # carries the databases and the two services that write to them.
 #
-# Port 443 is added by compose.https.yml, which start.sh includes through
+# Port 443 is added by compose.https.yml, which the installer includes through
 # COMPOSE_FILE in .env when the TLS mode is letsencrypt or custom.
 
 name: basicrum
@@ -62,7 +62,7 @@ services:
         condition: service_healthy
 
   basicrum_backend:
-    image: basicrum/backend_community:${BASICRUM_VERSION:?run ./start.sh to create .env}
+    image: basicrum/backend_community:${BASICRUM_VERSION:?run the Basicrum installer to create .env}
     platform: linux/amd64
     restart: always
     logging: *default-logging
@@ -70,14 +70,14 @@ services:
       HOST: 0.0.0.0
       PORT: "8080"
       NODE_ENV: production
-      APP_BASE_URL: ${PUBLIC_URL:?run ./start.sh to create .env}
-      PG_URL: postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?run ./start.sh to create .env}@basicrum_postgres:5432/${POSTGRES_DB:?}
+      APP_BASE_URL: ${PUBLIC_URL:?run the Basicrum installer to create .env}
+      PG_URL: postgresql://${POSTGRES_USER:?}:${POSTGRES_PASSWORD:?run the Basicrum installer to create .env}@basicrum_postgres:5432/${POSTGRES_DB:?}
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:?}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run ./start.sh to create .env}
-      JWT_SECRET: ${JWT_SECRET:?run ./start.sh to create .env}
-      COOKIE_SECRET: ${COOKIE_SECRET:?run ./start.sh to create .env}
-      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?run ./start.sh to create .env}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run the Basicrum installer to create .env}
+      JWT_SECRET: ${JWT_SECRET:?run the Basicrum installer to create .env}
+      COOKIE_SECRET: ${COOKIE_SECRET:?run the Basicrum installer to create .env}
+      REFRESH_TOKEN_SECRET: ${REFRESH_TOKEN_SECRET:?run the Basicrum installer to create .env}
       ORG_TOKEN_ENC_KEY_V1: ${ORG_TOKEN_ENC_KEY_V1:-}
       SUPER_ADMIN_EMAIL: ${SUPER_ADMIN_EMAIL:-}
       SAAS_SIGNUP_ENABLED: "false"
@@ -100,14 +100,14 @@ services:
       - internal
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.basicrum_backend.rule=Host(`${DOMAIN:?run ./start.sh to create .env}`) && PathPrefix(`/backend/v1`)"
+      - "traefik.http.routers.basicrum_backend.rule=Host(`${DOMAIN:?run the Basicrum installer to create .env}`) && PathPrefix(`/backend/v1`)"
       - "traefik.http.routers.basicrum_backend.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
       - "traefik.http.routers.basicrum_backend.priority=100"
       - "traefik.http.services.basicrum_backend.loadbalancer.server.port=8080"
       - "traefik.docker.network=${COMPOSE_PROJECT_NAME:-basicrum}_proxy"
 
   basicrum_beacon_service:
-    image: basicrum/beacon_service_community:${BASICRUM_VERSION:?run ./start.sh to create .env}
+    image: basicrum/beacon_service_community:${BASICRUM_VERSION:?run the Basicrum installer to create .env}
     platform: linux/amd64
     restart: always
     logging: *default-logging
@@ -117,7 +117,7 @@ services:
       RUST_LOG: ${BEACON_LOG_LEVEL:-info}
       CLICKHOUSE_URL: http://clickhouse:8123
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:?}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run ./start.sh to create .env}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run the Basicrum installer to create .env}
       ALLOW_BEACON_IP_OVERRIDE: ${ALLOW_BEACON_IP_OVERRIDE:-no}
       ALLOW_BEACON_TIMESTAMP_OVERRIDE: ${ALLOW_BEACON_TIMESTAMP_OVERRIDE:-no}
       TELEMETRY_EXPOSE: ${TELEMETRY_EXPOSE:-false}
@@ -141,22 +141,22 @@ services:
       - internal
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.basicrum_beacon_service.rule=Host(`${DOMAIN:?run ./start.sh to create .env}`) && Path(`/beacon/catcher`)"
+      - "traefik.http.routers.basicrum_beacon_service.rule=Host(`${DOMAIN:?run the Basicrum installer to create .env}`) && Path(`/beacon/catcher`)"
       - "traefik.http.routers.basicrum_beacon_service.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
       - "traefik.http.routers.basicrum_beacon_service.priority=200"
       - "traefik.http.services.basicrum_beacon_service.loadbalancer.server.port=3100"
       - "traefik.docker.network=${COMPOSE_PROJECT_NAME:-basicrum}_proxy"
 
   basicrum_frontend:
-    image: basicrum/frontend_community:${BASICRUM_VERSION:?run ./start.sh to create .env}
+    image: basicrum/frontend_community:${BASICRUM_VERSION:?run the Basicrum installer to create .env}
     platform: linux/amd64
     restart: always
     logging: *default-logging
     environment:
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?run ./start.sh to create .env}
-      AUTH_URL: ${PUBLIC_URL:?run ./start.sh to create .env}
-      NEXT_PUBLIC_API_URL: ${PUBLIC_URL:?run ./start.sh to create .env}
-      NEXT_PUBLIC_BEACON_ENDPOINT: ${PUBLIC_URL:?run ./start.sh to create .env}/beacon/catcher
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?run the Basicrum installer to create .env}
+      AUTH_URL: ${PUBLIC_URL:?run the Basicrum installer to create .env}
+      NEXT_PUBLIC_API_URL: ${PUBLIC_URL:?run the Basicrum installer to create .env}
+      NEXT_PUBLIC_BEACON_ENDPOINT: ${PUBLIC_URL:?run the Basicrum installer to create .env}/beacon/catcher
       BACKEND_URL_FOR_AUTH: http://basicrum_backend:8080/backend/v1
       NEXT_PUBLIC_SAAS_SIGNUP_ENABLED: "false"
       NEXT_PUBLIC_ENABLE_CHATBOT: ${NEXT_PUBLIC_ENABLE_CHATBOT:-}
@@ -179,7 +179,7 @@ services:
       - proxy
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.basicrum_frontend.rule=Host(`${DOMAIN:?run ./start.sh to create .env}`)"
+      - "traefik.http.routers.basicrum_frontend.rule=Host(`${DOMAIN:?run the Basicrum installer to create .env}`)"
       - "traefik.http.routers.basicrum_frontend.entrypoints=${TRAEFIK_ENTRYPOINT:-websecure}"
       - "traefik.http.routers.basicrum_frontend.priority=1"
       - "traefik.http.services.basicrum_frontend.loadbalancer.server.port=3000"
@@ -191,7 +191,7 @@ services:
     logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run ./start.sh to create .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run the Basicrum installer to create .env}
       POSTGRES_DB: ${POSTGRES_DB:?}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -214,7 +214,7 @@ services:
     logging: *default-logging
     environment:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:?}
-      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run ./start.sh to create .env}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?run the Basicrum installer to create .env}
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - ./clickhouse-config/system-logs.xml:/etc/clickhouse-server/config.d/system-logs.xml:ro

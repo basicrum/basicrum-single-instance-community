@@ -1,4 +1,4 @@
-# The HTTPS door. start.sh includes this file through COMPOSE_FILE in .env when
+# The HTTPS door. the installer includes this file through COMPOSE_FILE in .env when
 # TLS_MODE is letsencrypt or custom, and leaves it out for TLS_MODE=none, where
 # your own reverse proxy terminates TLS and only port 80 is published.
 services:
